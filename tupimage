@@ -67,16 +67,19 @@ automatic script running within tmux (tmux makes image uploading unreliable).
   General options:
     -f <image_file>, --file <image_file>
         The image file (but you can specify it as a positional argument).
+    --tty <file>
+        Use the given file to communicate with the terminal and output status
+        messages instead of /dev/tty.
     -e <file>, --err <file>
         Use <file> to output error messages in addition to displaying them as
         the status.
     -l <file>, --log <file>
         Enable logging and write logs to <file>.
     -V
-        Same as -l /dev/stderr (i.e. be very verbose).
+        Same as --log /dev/stderr (i.e. be very verbose).
     -q, --quiet
         Do not show status messages or uploading progress. Error messages are
-        still shown (but you can redirect them with -e).
+        still shown (but you can redirect them with --err).
     --save-info <file>
         Save some information to <file> (like image id, rows, columns, etc).
     -h
@@ -92,8 +95,6 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     -o <file>, --output <file>
         Use <file> to output the characters representing the image, instead of
         stdout.
-    -a, --append
-        Do not clear the output file (the one specified with -o).
     --noesc
         Do not issue the escape codes representing row numbers (encoded as
         foreground color).
@@ -240,13 +241,13 @@ override_ppi="$TUPIMAGE_OVERRIDE_PPI"
 file=""
 out="/dev/stdout"
 err=""
+tty="/dev/tty"
 log=""
 quiet=""
 noesc=""
 save_info=""
 no_upload=""
 force_upload=""
-append=""
 uploading_method="$TUPIMAGE_UPLOADING_METHOD"
 tmux_hijack_allowed="1"
 [[ -z "$TUPIMAGE_NO_TMUX_HIJACK" ]] || tmux_hijack_allowed=""
@@ -275,14 +276,14 @@ echolog() {
     fi
 }
 
-# A utility function to display what the script is doing.
+# A utility function to display what the script is doing (on tty).
 echostatus() {
     echolog "$1"
     if [[ -z "$quiet" ]]; then
         # clear the current line
-        echo -en "\033[2K\r"
+        echo -en "\033[2K\r" > "$tty"
         # And display the status
-        echo -n "$1"
+        echo -n "$1" > "$tty"
     fi
 }
 
@@ -315,16 +316,16 @@ while [[ $# -gt 0 ]]; do
             rows="$2"
             shift 2
             ;;
-        -a|--append)
-            append="1"
-            shift
-            ;;
         -o|--output)
             out="$2"
             shift 2
             ;;
         -e|--err)
             err="$2"
+            shift 2
+            ;;
+        --tty)
+            tty="$2"
             shift 2
             ;;
         -l|--log)
@@ -658,11 +659,6 @@ display_image() {
     # Clear the status line.
     echostatus
 
-    # Clear the output file
-    if [[ -z "$append" ]]; then
-        > "$out"
-    fi
-
     # Fill the output with characters representing the image
     for y in `seq 0 $(expr $rows - 1)`; do
         echo -n "$line_start"
@@ -759,17 +755,17 @@ fi
 # We will need to disable echo during image uploading, otherwise the response
 # from the terminal containing the image id will get echoed. We will restore the
 # terminal settings on exit unless we get brutally killed.
-stty_orig=`stty -g`
+stty_orig="$(stty -g < "$tty")"
 
 disable_echo() {
-    stty -echo
+    stty -echo < "$tty"
     # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
     # horrible issues otherwise.
-    stty susp undef
+    stty susp undef < "$tty"
 }
 
 restore_echo() {
-    stty $stty_orig
+    stty $stty_orig < "$tty"
 }
 
 # Utility to read response from the terminal that we don't need anymore. (If we
@@ -800,24 +796,24 @@ trap cleanup EXIT TERM
 if [[ -n "$inside_tmux" ]]; then
     # If we are in tmux we have to wrap the command in Ptmux.
     start_gr_command() {
-        echo -en '\ePtmux;\e\e_G'
+        echo -en '\ePtmux;\e\e_G' > "$tty"
     }
     end_gr_command() {
-        echo -en '\e\e\\\e\\'
+        echo -en '\e\e\\\e\\' > "$tty"
     }
 else
     start_gr_command() {
-        echo -en '\e_G'
+        echo -en '\e_G' > "$tty"
     }
     end_gr_command() {
-        echo -en '\e\\'
+        echo -en '\e\\' > "$tty"
     }
 fi
 
 # Send a graphics command with the correct start and end
 gr_command() {
     start_gr_command
-    echo -en "$1"
+    echo -en "$1" > "$tty"
     end_gr_command
     if [[ -n "$log" ]]; then
         local command="$(start_gr_command)$(echo -en "$1")$(end_gr_command)"
@@ -1079,8 +1075,8 @@ upload_image_impl() {
         fi
         # The uploading of the chunk goes here.
         start_gr_command
-        echo -en "i=$image_id,m=1;"
-        cat $chunk
+        echo -en "i=$image_id,m=1;" > "$tty"
+        cat $chunk > "$tty"
         end_gr_command
     done
 
@@ -1277,9 +1273,9 @@ get_cells_per_inch() {
     # Query the terminal to get the dimensions of a cell in pixels
     echolog "Getting cell width and height"
     if [[ -n "$inside_tmux" ]]; then
-        echo -en '\ePtmux;\e\e[16t\e\\'
+        echo -en '\ePtmux;\e\e[16t\e\\' > "$tty"
     else
-        echo -en '\e[16t'
+        echo -en '\e[16t' > "$tty"
     fi
     term_response=""
     if ! read -s -r -d 't' -t "$default_timeout" term_response; then
