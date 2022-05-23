@@ -155,20 +155,24 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Floating point values specifying the number of terminal columns and rows
         per inch (may be approximate). Used to compute the optimal number of
         columns and rows when -c and -r are not specified. If these parameters
-        are not specified, the environment variables
-        TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH will
-        be used. If they are not specified either, 12.0 and 6.0 will be used as
-        columns per inch and rows per inch respectively.
-    --override-dpi N
-        Override dpi value for the image (both vertical and horizontal). By
-        default dpi values will be requested using the 'identify' utility.
+        are not specified, TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH
+        will be used. If they are not specified either, 12.0 and 6.0 will be
+        used as columns per inch and rows per inch respectively.
+    --get-cells-per-inch
+        Queries the terminal and gets Xft.dpi to compute the number of columns
+        per inch and rows per inch and writes them to stdout. May be used to
+        initialize TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH (e.g. in
+        bashrc).
+    --override-ppi N
+        Override ppi value for the image (both vertical and horizontal). By
+        default ppi values will be requested using the 'identify' utility.
 
   Environment variables:
     TUPIMAGE_COLS_PER_INCH
     TUPIMAGE_ROWS_PER_INCH
         See  --cols-per-inch and --rows-per-inch.
-    TUPIMAGE_OVERRIDE_DPI
-        See --override-dpi.
+    TUPIMAGE_OVERRIDE_PPI
+        See --override-ppi.
     TUPIMAGE_CACHE_DIR
         The directory to store images being uploaded (in case if they need to be
         reuploaded) and session databases.
@@ -232,7 +236,7 @@ image_id=""
 cols_per_inch="$TUPIMAGE_COLS_PER_INCH"
 rows_per_inch="$TUPIMAGE_ROWS_PER_INCH"
 cache_dir="$TUPIMAGE_CACHE_DIR"
-override_dpi="$TUPIMAGE_OVERRIDE_DPI"
+override_ppi="$TUPIMAGE_OVERRIDE_PPI"
 file=""
 out="/dev/stdout"
 err=""
@@ -254,12 +258,13 @@ last_n=""
 reupload=""
 reupload_ids=()
 
-list_images=""
-clear_term=""
-clear_id=""
-clean_cache=""
-show_status=""
-show_id=""
+cmd_list_images=""
+cmd_clear_term=""
+cmd_clear_id=""
+cmd_clean_cache=""
+cmd_show_status=""
+cmd_show_id=""
+cmd_get_cells_per_inch=""
 
 command_count=0
 
@@ -402,8 +407,8 @@ while [[ $# -gt 0 ]]; do
             rows_per_inch="$2"
             shift 2
             ;;
-        --override-dpi)
-            override_dpi="$2"
+        --override-ppi|--override-dpi)
+            override_ppi="$2"
             shift 2
             ;;
         --last)
@@ -422,38 +427,43 @@ while [[ $# -gt 0 ]]; do
             done
             ;;
         --list|--ls)
-            list_images=1
+            cmd_list_images=1
             ((command_count++))
             shift
             ;;
         --clear-term)
-            clear_term=1
+            cmd_clear_term=1
             ((command_count++))
             shift
             ;;
         --clear-id)
-            clear_id="$2"
+            cmd_clear_id="$2"
             ((command_count++))
             shift 2
             ;;
         --clean-cache)
-            clean_cache=1
+            cmd_clean_cache=1
             ((command_count++))
             shift
             ;;
         --status)
-            show_status=1
+            cmd_show_status=1
             ((command_count++))
             shift
             ;;
         --show-id)
-            show_id="$2"
-            if [[ -z "$show_id" ]]; then
+            cmd_show_id="$2"
+            if [[ -z "$cmd_show_id" ]]; then
                 echoerr "No id specified"
                 exit 1
             fi
             ((command_count++))
             shift 2
+            ;;
+        --get-cells-per-inch)
+            cmd_get_cells_per_inch=1
+            ((command_count++))
+            shift
             ;;
 
         # Options used internally.
@@ -753,8 +763,8 @@ stty_orig=`stty -g`
 
 disable_echo() {
     stty -echo
-    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some horrible
-    # issues otherwise.
+    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
+    # horrible issues otherwise.
     stty susp undef
 }
 
@@ -831,7 +841,7 @@ get_terminal_response() {
     # -r means backslash is part of the line
     # -d '\' means \ is the line delimiter
     # -t ... is timeout in seconds
-    if ! read -r -d '\' -t "$response_timeout" term_response; then
+    if ! read -s -r -d '\' -t "$response_timeout" term_response; then
         if [[ -z "$term_response" ]]; then
             term_response_printable="No response from terminal"
         else
@@ -1174,7 +1184,7 @@ fi
 # Handling the clear-term command
 #####################################################################
 
-if [[ -n "$clear_term" ]]; then
+if [[ -n "$cmd_clear_term" ]]; then
     for terminal_dir in "$terminal_dir_256" "$terminal_dir_24bit"; do
         echomessage "Clearing $terminal_dir"
         (
@@ -1195,17 +1205,17 @@ fi
 # Handling the clear-id command
 #####################################################################
 
-if [[ -n "$clear_id" ]]; then
+if [[ -n "$cmd_clear_id" ]]; then
     for terminal_dir in "$terminal_dir_256" "$terminal_dir_24bit"; do
-        if [[ -e "$terminal_dir/$clear_id" ]]; then
+        if [[ -e "$terminal_dir/$cmd_clear_id" ]]; then
             (
                 flock --timeout "$default_timeout" 9 || \
                     { echoerr "Could not acquire a lock on $terminal_dir.lock"; \
                       exit 1; }
-                rm "$terminal_dir/$clear_id" 2> /dev/null
+                rm "$terminal_dir/$cmd_clear_id" 2> /dev/null
                 # Delete the image (if this command fails, e.g. because of tmux,
                 # we don't care).
-                gr_command "a=d,d=I,i=${clear_id},q=2"
+                gr_command "a=d,d=I,i=${cmd_clear_id},q=2"
                 exit 0
             ) 9>"$terminal_dir.lock" || exit 1
             exit 0
@@ -1218,7 +1228,7 @@ fi
 # Handling the clean-cache command
 #####################################################################
 
-if [[ -n "$clean_cache" ]]; then
+if [[ -n "$cmd_clean_cache" ]]; then
     cleanup_cache
     exit 0
 fi
@@ -1227,7 +1237,7 @@ fi
 # Handling the status command
 #####################################################################
 
-if [[ -n "$show_status" ]]; then
+if [[ -n "$cmd_show_status" ]]; then
     imgs_count="$(ls -1 "$cache_dir/cache" | wc -l)"
     imgs_size_total="$(du -sh "$cache_dir/cache" | cut -f1)"
     echomessage "$imgs_count images ($imgs_size_total) in $cache_dir/cache"
@@ -1253,6 +1263,55 @@ if [[ -n "$show_status" ]]; then
         echomessage "$script_name --fix"
     fi
     exit 0
+fi
+
+#####################################################################
+# Handling the get-resolution command
+#####################################################################
+
+# Tries to infer rows_per_inch and cols_per_inch by querying the terminal and
+# reading Xft.dpi
+get_cells_per_inch() {
+    cols_per_inch=""
+    rows_per_inch=""
+    # Query the terminal to get the dimensions of a cell in pixels
+    echolog "Getting cell width and height"
+    if [[ -n "$inside_tmux" ]]; then
+        echo -en '\ePtmux;\e\e[16t\e\\'
+    else
+        echo -en '\e[16t'
+    fi
+    term_response=""
+    if ! read -s -r -d 't' -t "$default_timeout" term_response; then
+        invalid_terminal_response
+        return 1
+    fi
+    cell_width=""
+    cell_height=""
+    read -r cell_height cell_width < \
+        <(sed -n 's/.*6;\([0-9]*\);\([0-9]*\)/\1 \2/p' <<< "$term_response")
+    if [[ -z "$cell_height" || -z "$cell_width" ]]; then
+        invalid_terminal_response
+        return 1
+    fi
+    echolog "cell width: $cell_width  cell height: $cell_height"
+
+    # Using Xft.dpi as a sane value for screen resolution.
+    xft_dpi="$(xrdb -query 2> /dev/null | grep 'Xft\.dpi:' | cut -f 2)"
+    echolog "The value of Xft.dpi is $xft_dpi"
+    if [[ -z "$xft_dpi" ]]; then
+        xft_dpi=96
+        echolog "Using 96 as the default screen resolution"
+    fi
+    cols_per_inch="$(bc <<< "scale=2;($xft_dpi)/($cell_width)")"
+    rows_per_inch="$(bc <<< "scale=2;($xft_dpi)/($cell_height)")"
+    echolog "cols per inch: $cols_per_inch  rows per inch: $rows_per_inch"
+}
+
+if [[ -n "$cmd_get_cells_per_inch" ]]; then
+    get_cells_per_inch
+    echo "$cols_per_inch $rows_per_inch"
+    exit $?
 fi
 
 #####################################################################
@@ -1362,15 +1421,15 @@ fi
 # Handling the show id command
 #####################################################################
 
-if [[ -n "$show_id" ]]; then
+if [[ -n "$cmd_show_id" ]]; then
     # If rows, columns and --no-upload are specified, just display the
     # placeholder.
     if [[ -n "$rows" && -n "$cols" && -n "$no_upload" ]]; then
-        display_image "$show_id" "$cols" "$rows"
+        display_image "$cmd_show_id" "$cols" "$rows"
         exit 0
     fi
 
-    if (( "$show_id" < 256 )); then
+    if (( "$cmd_show_id" < 256 )); then
         use_256="1"
     else
         use_256=""
@@ -1384,22 +1443,22 @@ if [[ -n "$show_id" ]]; then
         terminal_dir="$terminal_dir_24bit"
     fi
 
-    if [[ -z "$force_upload" ]] && [[ -e "$terminal_dir/$show_id" ]]; then
-        instance="$(head -1 "$terminal_dir/$show_id")"
+    if [[ -z "$force_upload" ]] && [[ -e "$terminal_dir/$cmd_show_id" ]]; then
+        instance="$(head -1 "$terminal_dir/$cmd_show_id")"
     else
         for inst in "$session_dir"/*; do
             inst_file="$session_dir/$inst"
             [[ -e "$inst_file" ]] || continue
             instance="$inst"
             if [[ -z "$no_upload" ]]; then
-                reupload_instance "$instance" "$show_id"
+                reupload_instance "$instance" "$cmd_show_id"
             fi
             break
         done
     fi
 
     if [[ -z "$instance" ]]; then
-        echoerr "Could not find image with id $show_id"
+        echoerr "Could not find image with id $cmd_show_id"
         exit 1
     fi
 
@@ -1407,7 +1466,7 @@ if [[ -n "$show_id" ]]; then
     md5="${inst_parts[0]}"
     [[ -n "$cols" ]] || cols="${inst_parts[1]}"
     [[ -n "$rows" ]] || rows="${inst_parts[2]}"
-    display_image "$show_id" "$cols" "$rows"
+    display_image "$cmd_show_id" "$cols" "$rows"
     exit 0
 fi
 
@@ -1415,7 +1474,7 @@ fi
 # Handling the ls command
 #####################################################################
 
-if [[ -n "$list_images" ]]; then
+if [[ -n "$cmd_list_images" ]]; then
     ids_left="$last_n"
     # Iterate over all image instances starting from the newest one.
     for inst_file in $(ls -t "$session_dir_256"/* "$session_dir_24bit"/*); do
@@ -1489,12 +1548,12 @@ if [[ -z "$cols" || -z "$rows" ]]; then
         echoerr "Couldn't get result from identify"
         exit 1
     fi
-    if [[ -n "$override_dpi" ]]; then
-        props[2]="$override_dpi"
-        props[3]="$override_dpi"
+    if [[ -n "$override_ppi" ]]; then
+        props[2]="$override_ppi"
+        props[3]="$override_ppi"
     fi
     echolog "Image pixel width: ${props[0]} pixel height: ${props[1]}"
-    echolog "Image x dpi: ${props[2]} y dpi: ${props[3]}"
+    echolog "Image x ppi: ${props[2]} y ppi: ${props[3]}"
     echolog "Columns per inch: ${cols_per_inch} Rows per inch: ${rows_per_inch}"
     opt_cols_expr="(${props[0]}*${cols_per_inch}/${props[2]})"
     opt_rows_expr="(${props[1]}*${rows_per_inch}/${props[3]})"
