@@ -163,7 +163,8 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Queries the terminal and gets Xft.dpi to compute the number of columns
         per inch and rows per inch and writes them to stdout. May be used to
         initialize TUPIMAGE_COLS_PER_INCH and TUPIMAGE_ROWS_PER_INCH (e.g. in
-        bashrc).
+        bashrc). Prints three numbers separated by space symbols: cols per inch,
+        rows per inch, screen dpi.
     --override-ppi N
         Override ppi value for the image (both vertical and horizontal). By
         default ppi values will be requested using the 'identify' utility.
@@ -1282,8 +1283,8 @@ get_cells_per_inch() {
         invalid_terminal_response
         return 1
     fi
-    cell_width=""
-    cell_height=""
+    local cell_width=""
+    local cell_height=""
     read -r cell_height cell_width < \
         <(sed -n 's/.*6;\([0-9]*\);\([0-9]*\)/\1 \2/p' <<< "$term_response")
     if [[ -z "$cell_height" || -z "$cell_width" ]]; then
@@ -1293,20 +1294,20 @@ get_cells_per_inch() {
     echolog "cell width: $cell_width  cell height: $cell_height"
 
     # Using Xft.dpi as a sane value for screen resolution.
-    xft_dpi="$(xrdb -query 2> /dev/null | grep 'Xft\.dpi:' | cut -f 2)"
-    echolog "The value of Xft.dpi is $xft_dpi"
-    if [[ -z "$xft_dpi" ]]; then
-        xft_dpi=96
+    screen_dpi="$(xrdb -query 2> /dev/null | grep 'Xft\.dpi:' | cut -f 2)"
+    echolog "The value of Xft.dpi is $screen_dpi"
+    if [[ -z "$screen_dpi" ]]; then
+        screen_dpi=96
         echolog "Using 96 as the default screen resolution"
     fi
-    cols_per_inch="$(bc <<< "scale=2;($xft_dpi)/($cell_width)")"
-    rows_per_inch="$(bc <<< "scale=2;($xft_dpi)/($cell_height)")"
+    cols_per_inch="$(bc <<< "scale=2;($screen_dpi)/($cell_width)")"
+    rows_per_inch="$(bc <<< "scale=2;($screen_dpi)/($cell_height)")"
     echolog "cols per inch: $cols_per_inch  rows per inch: $rows_per_inch"
 }
 
 if [[ -n "$cmd_get_cells_per_inch" ]]; then
     get_cells_per_inch
-    echo "$cols_per_inch $rows_per_inch"
+    echo "$cols_per_inch $rows_per_inch $screen_dpi"
     exit $?
 fi
 

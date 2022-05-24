@@ -82,7 +82,7 @@ done
 
 echo "Testing appending to a file (4 images)"
 for n in $(seq 2 5); do
-    $upload_image _data/tux.png --rows $n --columns $(( $n * 2 )) -a -o "$tmpdir/img"
+    $upload_image _data/tux.png --rows $n --columns $(( $n * 2 )) >> "$tmpdir/img"
 done
 cat "$tmpdir/img"
 
