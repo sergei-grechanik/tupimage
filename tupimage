@@ -521,6 +521,7 @@ fi
 echolog ""
 
 [[ -z "$save_info" ]] || > "$save_info"
+[[ -z "$out" ]] || > "$out"
 
 # Store the pid of the current process if requested. This is needed for tmux
 # hijacking so that the original script can wait for the uploading process.
