@@ -88,3 +88,55 @@ you want to display images as close as possible to their pixel size, this value
 should be the same as the one used to compute the number of cols and rows per
 inch (i.e. the value of `Xft.dpi` if you use `--get-cells-per-inch`, see the
 previous section).
+
+## Tmux
+
+Tupimage mostly supports tmux: image uploading commands are wrapped in
+pass-through sequences (`^[Ptmux`), and image placement is indicated via Unicode
+character with diacritics and color attributes, which are supported by tmux.
+However, there are several issues you should be aware of:
+* Nested tmux sessions are not supported (would require double wrapping).
+* Avoid having a tmux session attached to multiple terminals at the same time.
+* Older versions of tmux may drop pass-through sequences when the terminal is
+  too slow, making image uploading unreliable. This should be fixed in newer
+  versions of tmux. See [this issue](https://github.com/tmux/tmux/issues/3001).
+* Tmux doesn't allow sending pass-through sequences from inactive panes.
+  If tupimage finds itself inside an inactive pane, it tries to hijack focus
+  by creating a pane of height 1. If that fails, the image can be uploaded later
+  with `tupimage --fix`. The focus hijacking may be annoying, you can disabling
+  it by setting `TUPIMAGE_NO_TMUX_HIJACK=1`.
+* It is recommended to run `tupimage --clear-term` before or immediately after
+  attaching a tmux session to avoid displaying wrong images because of ID
+  collision.
+* After attaching a session to a new terminal you can run `tupimage --fix` to
+  try to reupload images known to the session (unless they were already removed
+  from the cache).
+
+## Image management
+
+When an image is uploaded to a terminal, it should be assigned an ID, which is
+then used to display the image (with Unicode placeholders the ID is encoded in
+the foreground color). Tupimage assigns image IDs by itself and stores it in a
+database corresponding to the current session (either a tmux session or just the
+current terminal window). Tupimage also records whether each image was uploaded
+to the current terminal (although it's not very reliable since terminal are
+allowed to delete images if they are out of space, so tupimage usually
+double-checks when uploading an image).
+
+You can list all images from the current session using the `--ls` flag:
+
+    tupimage --ls | less -R
+
+You can make the output more concise by limiting the number of rows displayed
+for each image with `-r`:
+
+    tupimage --ls -r 3 | less -R
+
+Some images may have the text `IMAGE NEEDS REUPLOADING!` displayed above them.
+Some images may have no such text but appear empty. Both have a chance to be
+fixed by running `tupimage --fix`, which will reupload images that are either
+marked as needing reupload or are not known by the terminal. Images will be
+reuploaded starting with the most recent ones. It's safe to interrupt the
+process with C-c, and it's also possible to limit the number of checked images
+using the `--last N` option (it's actually recommended since you may hit the
+terminal's quota on the total volume of uploaded images).

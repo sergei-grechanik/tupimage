@@ -300,6 +300,11 @@ echomessage() {
     fi
 }
 
+# Write something to $out.
+echoout() {
+    echo "$1" >> "$out"
+}
+
 # Display an error message, both as the status and to $err, prefixed with
 # "error:".
 echoerr() {
@@ -1482,7 +1487,7 @@ if [[ -n "$cmd_list_images" ]]; then
             ((ids_left--))
         fi
         if [[ ! -e "$inst_file" ]]; then
-            echomessage "File doesn't exist: $inst_file"
+            echoout "File doesn't exist: $inst_file"
             continue
         fi
         inst="$(basename "$inst_file")"
@@ -1491,14 +1496,15 @@ if [[ -n "$cmd_list_images" ]]; then
         im_cols="${inst_parts[1]}"
         im_rows="${inst_parts[2]}"
         id="$(head -1 "$inst_file")"
-        echomessage "id: $id  cols: $im_cols  rows: $im_rows  md5sum: $md5"
+        echoout "id: $id  cols: $im_cols  rows: $im_rows  md5sum: $md5"
         if [[ ! -e "$terminal_dir_256/$id" ]] &&
                 [[ ! -e "$terminal_dir_24bit/$id" ]]; then
-            echomessage "$(tput bold)IMAGE NEEDS REUPLOADING!$(tput sgr0)"
+            echoout "$(tput bold)IMAGE NEEDS REUPLOADING!$(tput sgr0)"
         fi
         [[ -n "$cols" ]] && im_cols="$cols"
         [[ -n "$rows" ]] && im_rows="$rows"
         display_image "$id" "$im_cols" "$im_rows"
+        echoout ""
     done
     exit 0
 fi
