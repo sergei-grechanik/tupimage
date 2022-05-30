@@ -802,20 +802,19 @@ trap cleanup EXIT TERM
 # Functions to emit the start and the end of a graphics command.
 if [[ -n "$inside_tmux" ]]; then
     # If we are in tmux we have to wrap the command in Ptmux.
-    start_gr_command() {
-        echo -en '\ePtmux;\e\e_G' > "$tty"
-    }
-    end_gr_command() {
-        echo -en '\e\e\\\e\\' > "$tty"
-    }
+    graphics_command_start='\ePtmux;\e\e_G'
+    graphics_command_end='\e\e\\\e\\'
 else
-    start_gr_command() {
-        echo -en '\e_G' > "$tty"
-    }
-    end_gr_command() {
-        echo -en '\e\\' > "$tty"
-    }
+    graphics_command_start='\e_G'
+    graphics_command_end='\e\\'
 fi
+
+start_gr_command() {
+    echo -en "$graphics_command_start" > "$tty"
+}
+end_gr_command() {
+    echo -en "$graphics_command_end" > "$tty"
+}
 
 # Send a graphics command with the correct start and end
 gr_command() {
@@ -823,7 +822,7 @@ gr_command() {
     echo -en "$1" > "$tty"
     end_gr_command
     if [[ -n "$log" ]]; then
-        local command="$(start_gr_command)$(echo -en "$1")$(end_gr_command)"
+        local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
         echolog "SENDING COMMAND: $(sed 's/\x1b/^[/g' <<< "$command")"
     fi
 }
