@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # vim: shiftwidth=4
 
@@ -99,7 +99,7 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Do not issue the escape codes representing row numbers (encoded as
         foreground color).
     --show-id N
-        Display the image with the given id. The image may be reuploaded if
+        Display the image with the given id. The image will be reuploaded if
         needed.
 
   ID assignment options:
@@ -513,7 +513,9 @@ if (( $command_count > 0 )); then
     fi
 fi
 
-if [[ ! "$uploading_method" =~ ^(direct|file|both|auto|)$ ]]; then
+[[ -n "$uploading_method" ]] || uploading_method="auto"
+
+if [[ ! "$uploading_method" =~ ^(direct|file|both|auto)$ ]]; then
     echoerr "Unknown uploading method: $uploading_method"
     exit 1
 fi
@@ -592,7 +594,7 @@ echolog "session_id=$session_id"
 # Choosing the uploading method
 #####################################################################
 
-if [[ "$uploading_method" =~ ^(auto|)$ ]]; then
+if [[ "$uploading_method" =~ ^(auto)$ ]]; then
     if [[ -n "$SSH_CLIENT" || -n "$SSH_TTY" || -n "$SSH_CONNECTION" ]]; then
         echolog "Look like we are in ssh, using direct uploading"
         uploading_method="direct"
