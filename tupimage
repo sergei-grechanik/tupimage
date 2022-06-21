@@ -92,7 +92,11 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     -r N, --rows N
         The number of columns and rows for the image. By default the script will
         try to compute the optimal values by itself.
-    -o <file>, --output <file>
+    -x COLUMN, -y LINE
+        Place the image and the status line at the given absolute coordinates.
+        The coordinates are 1-based. Note that the output will use ANSI cursor
+        movement sequences instead of \\n.
+    -o <file>, --out <file>, --output <file>
         Use <file> to output the characters representing the image, instead of
         stdout.
     --noesc
@@ -231,6 +235,8 @@ num_images_to_delete=4
 
 cols=""
 rows=""
+start_x=""
+start_y=""
 max_cols=""
 max_rows=""
 use_256=""
@@ -270,47 +276,6 @@ cmd_get_cells_per_inch=""
 
 command_count=0
 
-# A utility function to print logs
-echolog() {
-    if [[ -n "$log" ]]; then
-        (flock 1; echo "$$ $(date +%s.%3N) $1") >> "$log"
-    fi
-}
-
-# A utility function to display what the script is doing (on tty).
-echostatus() {
-    echolog "$1"
-    if [[ -z "$quiet" ]]; then
-        # clear the current line
-        echo -en "\033[2K\r" > "$tty"
-        # And display the status
-        echo -n "$1" > "$tty"
-    fi
-}
-
-# Display a message, both as the status and to $err.
-echomessage() {
-    if [[ -z "$err" ]]; then
-        echostatus ""
-        echo "$1" >> /dev/stderr
-        echolog "$1"
-    else
-        echostatus "$1"
-        echo "$1" >> "$err"
-    fi
-}
-
-# Write something to $out.
-echoout() {
-    echo "$1" >> "$out"
-}
-
-# Display an error message, both as the status and to $err, prefixed with
-# "error:".
-echoerr() {
-    echomessage "error: $1"
-}
-
 # Parse the command line.
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -322,7 +287,15 @@ while [[ $# -gt 0 ]]; do
             rows="$2"
             shift 2
             ;;
-        -o|--output)
+        -x)
+            start_x="$2"
+            shift 2
+            ;;
+        -y)
+            start_y="$2"
+            shift 2
+            ;;
+        -o|--out|--output)
             out="$2"
             shift 2
             ;;
@@ -356,7 +329,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -f|--file)
             if [[ -n "$file" ]]; then
-                echoerr "Multiple image files are not supported"
+                echo "Multiple image files are not supported" >&2
                 exit 1
             fi
             file="$2"
@@ -401,7 +374,7 @@ while [[ $# -gt 0 ]]; do
         --max-rows)
             max_rows="$2"
             if (( max_rows > 255 )); then
-                echoerr "--max-rows cannot be larger than 255 ($2 is specified)"
+                echo "--max-rows cannot be larger than 255 ($2 is specified)" >&2
                 exit 1
             fi
             shift 2
@@ -461,7 +434,7 @@ while [[ $# -gt 0 ]]; do
         --show-id)
             cmd_show_id="$2"
             if [[ -z "$cmd_show_id" ]]; then
-                echoerr "No id specified"
+                echo "No id specified" >&2
                 exit 1
             fi
             ((command_count++))
@@ -488,12 +461,12 @@ while [[ $# -gt 0 ]]; do
             ;;
 
         -*)
-            echoerr "Unknown option: $1"
+            echo "Unknown option: $1" >&2
             exit 1
             ;;
         *)
             if [[ -n "$file" ]]; then
-                echoerr "Multiple image files are not supported: $file and $1"
+                echo "Multiple image files are not supported: $file and $1" >&2
                 exit 1
             fi
             file="$1"
@@ -502,13 +475,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+#####################################################################
+# Verify options, compute defaults
+#####################################################################
+
 if (( $command_count > 0 )); then
     if (( $command_count > 1 )); then
-        echoerr "Only one command-like option may be specified"
+        echo "Only one command-like option may be specified" >&2
         exit 1
     fi
     if [[ -n "$file" ]]; then
-        echoerr "File cannot be specified together with a command-like option"
+        echo "File cannot be specified together with a command-like option" >&2
         exit 1
     fi
 fi
@@ -516,11 +493,108 @@ fi
 [[ -n "$uploading_method" ]] || uploading_method="auto"
 
 if [[ ! "$uploading_method" =~ ^(direct|file|both|auto)$ ]]; then
-    echoerr "Unknown uploading method: $uploading_method"
+    echo "Unknown uploading method: $uploading_method" >&2
     exit 1
 fi
 
+# If start_x or start_y is specified, make sure that both are set.
+if [[ -n "$start_x" || -n "$start_y" ]]; then
+    [[ -n "$start_x" ]] || start_x=0
+    [[ -n "$start_y" ]] || start_y=0
+fi
+
+# The number of terminal columns starting from the upper left corner. This value
+# is used when displaying the status message so that we take only 1 line.
+max_terminal_cols="$(tput cols)"
+if [[ -n "$start_x" ]]; then
+    max_terminal_cols="$(( "$max_terminal_cols" - "$start_x" + 1 ))"
+fi
+
+# Write max_terminal_cols spaces to `eraser`. It will be used to erase the status line.
+printf -v eraser '%0.s ' $(seq 1 "$max_terminal_cols")
+
+# Compute the maximum number of rows and columns if these values were not
+# specified.
+if [[ -z "$max_cols" ]]; then
+    max_cols="$max_terminal_cols"
+fi
+if [[ -z "$max_rows" ]]; then
+    max_rows="$(tput lines)"
+    if [[ -n "$start_y" ]]; then
+        max_rows="$(( "$max_rows" - "$start_y" + 1 ))"
+    fi
+    if (( max_rows > 255 )); then
+        max_rows=255
+    fi
+fi
+
+if (( "$max_rows" <= 0 )) || (( "$max_cols" <= 0 )); then
+    echo "Max rows ($max_rows) and max cols ($max_cols) cannot be <= 0" >&2
+    exit 1
+fi
+
+#####################################################################
+# Logging, status and error reporting functions
+#####################################################################
+
+# A utility function to print logs
+echolog() {
+    if [[ -n "$log" ]]; then
+        (flock 1; echo "$$ $(date +%s.%3N) $1") >> "$log"
+    fi
+}
+
+# A utility function to display what the script is doing (on tty).
+echostatus() {
+    echolog "$1"
+    if [[ -z "$quiet" ]]; then
+        # Clear the current line
+        if [[ -z "$start_x" ]]; then
+            echo -ne "\r" > "$tty"
+            echo -n "${eraser}" > "$tty"
+            echo -ne "\r" > "$tty"
+        else
+            # If -x/-y are specified, move to the upper left corner first.
+            echo -en "\e[${start_y};${start_x}H" > "$tty"
+            echo -n "${eraser}" > "$tty"
+            echo -en "\e[${start_y};${start_x}H" > "$tty"
+        fi
+        # And display the status. Truncate it if it's too long.
+        echo -n "$1" | colrm "$max_terminal_cols" > "$tty"
+    fi
+}
+
+# Display a message, both as the status and to $err.
+echomessage() {
+    if [[ -z "$err" ]]; then
+        echostatus ""
+        echo "$1" >> /dev/stderr
+        echolog "$1"
+    else
+        echostatus "$1"
+        echo "$1" >> "$err"
+    fi
+}
+
+# Write something to $out.
+echoout() {
+    echo "$1" >> "$out"
+}
+
+# Display an error message, both as the status and to $err, prefixed with
+# "error:".
+echoerr() {
+    echomessage "error: $1"
+}
+
+#####################################################################
+# Some basic initialization
+#####################################################################
+
 echolog ""
+
+echolog "max_cols: $max_cols"
+echolog "max_rows: $max_rows"
 
 [[ -z "$save_info" ]] || > "$save_info"
 [[ -z "$out" ]] || > "$out"
@@ -668,16 +742,26 @@ display_image() {
     # Clear the status line.
     echostatus
 
+    # If we are requested to display the image at the given absolute
+    # coordinates, we will use ANSI cursor movement codes, otherwise just append
+    # \n to line_end.
+    if [[ -z "$start_x" ]]; then
+        printf -v line_end '%s\n' "$line_end"
+    fi
+
     # Fill the output with characters representing the image
     for y in `seq 0 $(expr $rows - 1)`; do
+        # If we are using absolute positioning, explicitly move the cursor.
+        if [[ -n "$start_x" ]]; then
+            echo -en "\e[$(("$start_y" + "$y"));${start_x}H"
+        fi
         echo -n "$line_start"
         for x in `seq 0 $(expr $cols - 1)`; do
             # Note that when $x is out of bounds, the column diacritic will be
             # empty, meaning that the column should be guessed by the terminal.
             printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
         done
-        echo -n "$line_end"
-        printf "\n"
+        printf '%s' "$line_end"
     done >> "$out"
 }
 
@@ -1533,17 +1617,6 @@ bc_round() {
 }
 
 if [[ -z "$cols" || -z "$rows" ]]; then
-    # Compute the maximum number of rows and columns if these values were not
-    # specified.
-    if [[ -z "$max_cols" ]]; then
-        max_cols="$(tput cols)"
-    fi
-    if [[ -z "$max_rows" ]]; then
-        max_rows="$(tput lines)"
-        if (( max_rows > 255 )); then
-            max_rows=255
-        fi
-    fi
     # Default values of rows per inch and columns per inch.
     [[ -n "$cols_per_inch" ]] || cols_per_inch=12.0
     [[ -n "$rows_per_inch" ]] || rows_per_inch=6.0
