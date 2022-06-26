@@ -18,6 +18,11 @@ terminals:
 <!-- vim-markdown-toc GFM -->
 
 * [Installation](#installation)
+* [Applications](#applications)
+    * [matplotlib](#matplotlib)
+    * [Ranger](#ranger)
+* [Tmux support](#tmux-support)
+* [SSH support](#ssh-support)
 * [Basic usage](#basic-usage)
     * [Help](#help)
     * [Suppressing uploading progress](#suppressing-uploading-progress)
@@ -25,8 +30,6 @@ terminals:
 * [Automatically computing the number of rows/columns](#automatically-computing-the-number-of-rowscolumns)
     * [Image resolution (PPI/DPI)](#image-resolution-ppidpi)
     * [Max rows and columns](#max-rows-and-columns)
-* [Tmux](#tmux)
-* [SSH](#ssh)
 * [Image management](#image-management)
     * [8-bit image IDs](#8-bit-image-ids)
 * [Image formats](#image-formats)
@@ -43,6 +46,59 @@ the session database.
 
 In the future I'll probably rewrite it in python since it became too complex for
 a bash script.
+
+## Applications
+
+### matplotlib
+You can use [this fork of
+itermplot](https://github.com/sergei-grechanik/itermplot) with tupimage:
+
+    ITERMPLOT_IMAGE_DISPLAY_COMMAND="tupimage" MPLBACKEND="module://itermplot" python3 ./docs/test.py
+
+### Ranger
+Use [this fork of ranger](https://github.com/sergei-grechanik/ranger). Don't
+forget to enable it in your `~/.config/ranger/rc.conf`:
+
+    set preview_images true
+    set preview_images_method tupimage
+
+## Tmux support
+
+First of all, you need to enable pass-through sequences for newer versions of
+tmux in your `.tmux.conf`:
+
+    set -gq allow-passthrough
+
+Tupimage mostly supports tmux: image uploading commands are wrapped in
+pass-through sequences (`^[Ptmux`), and image placement is indicated via Unicode
+character with diacritics and color attributes, which are supported by tmux.
+However, there are several issues you should be aware of:
+
+* Nested tmux sessions are not supported (would require double wrapping).
+* Avoid having a tmux session attached to multiple terminals at the same time.
+* Older versions of tmux may drop pass-through sequences when the terminal is
+  too slow, making image uploading unreliable. This should be fixed in newer
+  versions of tmux. See [this issue](https://github.com/tmux/tmux/issues/3001).
+* Tmux doesn't allow sending pass-through sequences from inactive panes.
+  If tupimage finds itself inside an inactive pane, it tries to hijack focus
+  by creating a pane of height 1. If that fails, the image can be uploaded later
+  with `tupimage --fix`. The focus hijacking may be annoying, you can disabling
+  it by setting `TUPIMAGE_NO_TMUX_HIJACK=1`.
+* It is recommended to run `tupimage --clear-term` before or immediately after
+  attaching a tmux session to avoid displaying wrong images because of ID
+  collision.
+* After attaching a session to a new terminal you can run `tupimage --fix` to
+  try to reupload images known to the session (unless they were already removed
+  from the cache).
+* If tupimage freezes under tmux, make sure that the version of the tmux on your
+  PATH is the same as the version of the running tmux server.
+
+## SSH support
+
+SSH is supported. By default, when tupimage detects that it's inside ssh, it
+switches from file-based uploading to direct uploading. Using both tmux and ssh
+should work when tmux runs on the remote machine (`ssh->tmux`), but the case
+when tmux runs locally (`tmux->ssh`) is not supported.
 
 ## Basic usage
 
@@ -135,44 +191,6 @@ previous section).
 If the automatically computed number of columns and rows is greater than the
 terminal width or height, tupimage will fit the image to the terminal size. You
 can override this behavior using the options `--max-cols N` and `--max-rows N`.
-
-## Tmux
-
-First of all, you need to enable pass-through sequences for newer versions of
-tmux in your `.tmux.conf`:
-
-    set -gq allow-passthrough
-
-Tupimage mostly supports tmux: image uploading commands are wrapped in
-pass-through sequences (`^[Ptmux`), and image placement is indicated via Unicode
-character with diacritics and color attributes, which are supported by tmux.
-However, there are several issues you should be aware of:
-
-* Nested tmux sessions are not supported (would require double wrapping).
-* Avoid having a tmux session attached to multiple terminals at the same time.
-* Older versions of tmux may drop pass-through sequences when the terminal is
-  too slow, making image uploading unreliable. This should be fixed in newer
-  versions of tmux. See [this issue](https://github.com/tmux/tmux/issues/3001).
-* Tmux doesn't allow sending pass-through sequences from inactive panes.
-  If tupimage finds itself inside an inactive pane, it tries to hijack focus
-  by creating a pane of height 1. If that fails, the image can be uploaded later
-  with `tupimage --fix`. The focus hijacking may be annoying, you can disabling
-  it by setting `TUPIMAGE_NO_TMUX_HIJACK=1`.
-* It is recommended to run `tupimage --clear-term` before or immediately after
-  attaching a tmux session to avoid displaying wrong images because of ID
-  collision.
-* After attaching a session to a new terminal you can run `tupimage --fix` to
-  try to reupload images known to the session (unless they were already removed
-  from the cache).
-* If tupimage freezes under tmux, make sure that the version of the tmux on your
-  PATH is the same as the version of the running tmux server.
-
-## SSH
-
-SSH is supported. By default, when tupimage detects that it's inside ssh, it
-switches from file-based uploading to direct uploading. Using both tmux and ssh
-should work when tmux runs on the remote machine (`ssh->tmux`), but the case
-when tmux runs locally (`tmux->ssh`) is not supported.
 
 ## Image management
 
