@@ -62,6 +62,12 @@ $upload_image _data/wikipedia.png
 echo "Wikipedia logo with enforced dpi=96"
 $upload_image _data/wikipedia.png --override-dpi 96
 
+echo "Wikipedia logo, less diacritics, 5 rows"
+$upload_image _data/wikipedia.png -r 5 --less-diacritics
+
+echo "Wikipedia logo, less diacritics, 1 column"
+$upload_image _data/wikipedia.png -c 1 --less-diacritics
+
 echo "Testing -r (5 images)"
 for i in $(seq 1 5); do
     $upload_image _data/wikipedia.png -r $i

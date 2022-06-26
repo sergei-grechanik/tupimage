@@ -82,6 +82,8 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         still shown (but you can redirect them with --err).
     --save-info <file>
         Save some information to <file> (like image id, rows, columns, etc).
+    --abort-on-keypress
+        Abort when there is an input from the user.
     -h
         Show brief help.
     --help
@@ -102,6 +104,10 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --noesc
         Do not issue the escape codes representing row numbers (encoded as
         foreground color).
+    --less-diacritics
+        Don't use column diacritics and specify the row number only in the first
+        cell of a row. This will make the placeholder more lightweight but less
+        reliable if it's partially obscured.
     --show-id N
         Display the image with the given id. The image will be reuploaded if
         needed.
@@ -251,7 +257,9 @@ err=""
 tty="/dev/tty"
 log=""
 quiet=""
+abort_on_keypress=""
 noesc=""
+less_diacritics=""
 save_info=""
 no_upload=""
 force_upload=""
@@ -319,6 +327,10 @@ while [[ $# -gt 0 ]]; do
             quiet="1"
             shift
             ;;
+        --abort-on-keypress)
+            abort_on_keypress=1
+            shift
+            ;;
         -h)
             echo "$short_help"
             exit 0
@@ -345,6 +357,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --noesc)
             noesc=1
+            shift
+            ;;
+        --less-diacritics)
+            less_diacritics=1
             shift
             ;;
         --save-info)
@@ -606,6 +622,20 @@ if [[ -n "$store_pid" ]]; then
     echo "$$" > "$store_pid"
 fi
 
+check_keypress() {
+    if [[ -n "$abort_on_keypress" ]]; then
+        read_character=""
+        if read -n 1 -t 0.001 read_character; then
+            if [[ -n "$read_character" ]]; then
+                echoerr "Aborted on key press"
+                exit 1
+            fi
+        fi
+    fi
+}
+
+check_keypress
+
 #####################################################################
 # Detecting tmux and figuring out the actual terminal name
 #####################################################################
@@ -722,6 +752,14 @@ display_image() {
         "\U1d185" "\U1d186" "\U1d187" "\U1d188" "\U1d189" "\U1d1aa" "\U1d1ab"
         "\U1d1ac" "\U1d1ad" "\U1d242" "\U1d243" "\U1d244")
 
+    local row_string=""
+    if [[ -n "$less_diacritics" ]]; then
+        for idx in $(seq 2 "$cols"); do
+            row_string="${row_string}"
+            printf -v row_string "%s\UEEEE" "$row_string"
+        done
+    fi
+
     # Each line starts with the escape sequence to set the foreground color to
     # the image id, unless --noesc is specified.
     line_start=""
@@ -751,16 +789,26 @@ display_image() {
 
     # Fill the output with characters representing the image
     for y in `seq 0 $(expr $rows - 1)`; do
+        if [[ $((y % 10)) -eq 0 ]]; then
+            check_keypress
+        fi
         # If we are using absolute positioning, explicitly move the cursor.
         if [[ -n "$start_x" ]]; then
             echo -en "\e[$(("$start_y" + "$y"));${start_x}H"
         fi
         echo -n "$line_start"
-        for x in `seq 0 $(expr $cols - 1)`; do
-            # Note that when $x is out of bounds, the column diacritic will be
-            # empty, meaning that the column should be guessed by the terminal.
-            printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
-        done
+        if [[ -n "$less_diacritics" ]]; then
+            # In the less diacritics mode specify the row only in the first
+            # cell, and the use just \UEEEE.
+            printf "\UEEEE${rowcolumn_diacritics[$y]}%s" "$row_string"
+        else
+            for x in `seq 0 $(expr $cols - 1)`; do
+                # Note that when $x is out of bounds, the column diacritic will
+                # be empty, meaning that the column should be guessed by the
+                # terminal.
+                printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
+            done
+        fi
         printf '%s' "$line_end"
     done >> "$out"
 }
@@ -1142,6 +1190,7 @@ upload_image_impl() {
         echolog "Uploading chunk $chunk"
         chunk_i=$((chunk_i+1))
         if [[ $((chunk_i % 10)) -eq 1 ]]; then
+            check_keypress
             # Check if we are still in the active pane
             if [[ -n "$inside_tmux" ]]; then
                 if ! tmux_is_active_pane; then
