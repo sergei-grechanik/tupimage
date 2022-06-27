@@ -994,18 +994,19 @@ get_terminal_response() {
     fi
 }
 
-# Uploads an image to the terminal. If $terminal_dir is specified, acquires the
-# lock and adds the image to the list of images known to be uploaded to the
-# terminal.
-# Usage: upload_image $image_id $file $cols $rows [$terminal_dir]
+# Uploads an image to the terminal. If $terminal_dir and $img_instance are
+# specified, acquires the lock and adds the image to the list of images known to
+# be uploaded to the terminal.
+# Usage: upload_image $image_id $file $cols $rows [$terminal_dir] [$img_instance]
 upload_image() {
     local image_id="$1"
     local file="$2"
     local cols="$3"
     local rows="$4"
     local terminal_dir="$5"
+    local img_instance="$6"
 
-    if [[ -n "$terminal_dir" ]]; then
+    if [[ -n "$terminal_dir" ]] && [[ -n "$img_instance" ]]; then
         (
             flock --timeout "$default_timeout" 9 || \
                 { echoerr "Could not acquire a lock on $terminal_dir.lock"; \
@@ -1477,7 +1478,7 @@ reupload_instance() {
         local terminal_dir="$terminal_dir_24bit"
     fi
 
-    upload_image "$id" "$cached_file" "$cols" "$rows" "$terminal_dir"
+    upload_image "$id" "$cached_file" "$cols" "$rows" "$terminal_dir" "$inst"
     return $?
 }
 
@@ -1582,11 +1583,16 @@ if [[ -n "$cmd_show_id" ]]; then
 
     if [[ -z "$force_upload" ]] && [[ -e "$terminal_dir/$cmd_show_id" ]]; then
         instance="$(head -1 "$terminal_dir/$cmd_show_id")"
-    else
-        for inst in "$session_dir"/*; do
-            inst_file="$session_dir/$inst"
+        if [[ -z "$instance" ]]; then
+            echoerr "File $terminal_dir/$cmd_show_id exists but is empty"
+        fi
+    fi
+
+    if [[ -z "$instance" ]]; then
+        for inst_file in "$session_dir"/*; do
             [[ -e "$inst_file" ]] || continue
-            instance="$inst"
+            [[ "$(head -1 "$inst_file")" == "$cmd_show_id" ]] || continue
+            instance="$(basename "$inst_file")"
             if [[ -z "$no_upload" ]]; then
                 reupload_instance "$instance" "$cmd_show_id"
             fi
@@ -1933,7 +1939,8 @@ if [[ -z "$no_upload" ]]; then
        ! image_needs_reuploading "$image_id" "$cols" "$rows"; then
         echolog "Image already uploaded"
     else
-        upload_image "$image_id" "$cached_file" "$cols" "$rows" "$terminal_dir"
+        upload_image "$image_id" "$cached_file" "$cols" "$rows" \
+            "$terminal_dir" "$img_instance"
     fi
 fi
 
