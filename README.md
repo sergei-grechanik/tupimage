@@ -21,6 +21,7 @@ terminals:
 * [Applications](#applications)
     * [matplotlib](#matplotlib)
     * [Ranger](#ranger)
+    * [Vim](#vim)
 * [Tmux support](#tmux-support)
 * [SSH support](#ssh-support)
 * [Basic usage](#basic-usage)
@@ -61,6 +62,11 @@ forget to enable it in your `~/.config/ranger/rc.conf`:
 
     set preview_images true
     set preview_images_method tupimage
+
+### Vim
+There is a demo vim plugin to preview images in floating windows
+[here](https://github.com/sergei-grechanik/vim-terminal-images). Very
+experimental, not much documentation.
 
 ## Tmux support
 
