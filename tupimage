@@ -625,7 +625,7 @@ fi
 check_keypress() {
     if [[ -n "$abort_on_keypress" ]]; then
         read_character=""
-        if read -n 1 -t 0.001 read_character; then
+        if read -n 1 -t 0.001 read_character < "$tty"; then
             if [[ -n "$read_character" ]]; then
                 echoerr "Aborted on key press"
                 exit 1
@@ -912,7 +912,7 @@ restore_echo() {
 # Utility to read response from the terminal that we don't need anymore. (If we
 # don't read it it may end up being displayed which is not pretty).
 consume_errors() {
-    while read -r -d '\' -t 0.1 term_response; do
+    while read -r -d '\' -t 0.1 term_response < "$tty"; do
         echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
     done
 }
@@ -977,7 +977,7 @@ get_terminal_response() {
     # -r means backslash is part of the line
     # -d '\' means \ is the line delimiter
     # -t ... is timeout in seconds
-    if ! read -s -r -d '\' -t "$response_timeout" term_response; then
+    if ! read -s -r -d '\' -t "$response_timeout" term_response < "$tty"; then
         if [[ -z "$term_response" ]]; then
             term_response_printable="No response from terminal"
         else
@@ -1419,7 +1419,7 @@ get_cells_per_inch() {
         echo -en '\e[16t' > "$tty"
     fi
     term_response=""
-    if ! read -s -r -d 't' -t "$default_timeout" term_response; then
+    if ! read -s -r -d 't' -t "$default_timeout" term_response < "$tty"; then
         invalid_terminal_response
         return 1
     fi
