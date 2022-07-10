@@ -22,6 +22,7 @@ terminals:
     * [matplotlib](#matplotlib)
     * [Ranger](#ranger)
     * [Vim](#vim)
+    * [fzf](#fzf)
 * [Tmux support](#tmux-support)
 * [SSH support](#ssh-support)
 * [Basic usage](#basic-usage)
@@ -67,6 +68,23 @@ forget to enable it in your `~/.config/ranger/rc.conf`:
 There is a demo vim plugin to preview images in floating windows
 [here](https://github.com/sergei-grechanik/vim-terminal-images). Very
 experimental, not much documentation.
+
+### fzf
+Fzf prevents proper two-way communication with the terminal (if you know how to
+work around it, please tell me). Try the one-way mode:
+
+    fzf --preview 'tupimage --less-diacritics -q --one-way --max-cols $FZF_PREVIEW_COLUMNS --max-rows $FZF_PREVIEW_LINES {}'
+
+(`--less-diacritics` is optional, `-q` disables uploading status line).
+It's not very reliable since the response from the terminal is not checked.
+Sometimes tupimage will think that the image is already uploaded and won't try
+to reupload it again, although the reuploading might have failed and you see an
+empty box. You can try to force reuploading each time to fix this:
+
+    fzf --preview 'tupimage --force-upload --less-diacritics -q --one-way --max-cols $FZF_PREVIEW_COLUMNS --max-rows $FZF_PREVIEW_LINES {}'
+
+Also, older versions of fzf seem to have problems with unicode symbol width, so
+you may need to update it.
 
 ## Tmux support
 

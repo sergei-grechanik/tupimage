@@ -123,6 +123,12 @@ $upload_image --show-id "$image_id"
 echo "Testing being verbose (-V) but without status messages (-q)"
 $upload_image _data/tux.png --rows 4 -V -q
 
+echo "Testing one-way mode and forced uploading"
+$upload_image _data/tux.png --rows 3 --one-way --force-upload
+
+echo "Testing one-way mode"
+$upload_image _data/tux.png --rows 3 --one-way
+
 echo "Test overriding an existing id (the 9999 image above will change)"
 $upload_image _data/tux.png --id 9999 -r 4
 
@@ -135,6 +141,13 @@ $upload_image _data/earth.jpg -r 10
 
 echo "Uploading an image using direct method"
 $upload_image _data/mars.jpg -r 10 -m direct
+
+echo "Testing one-way mode with direct method"
+$upload_image _data/tux.png --rows 3 --one-way -m direct --force-upload
+
+echo "Testing one-way mode with a file instead of tty (may fail)"
+$upload_image _data/earth.jpg --tty "$tmpdir/tty" --one-way --max-cols 5 --max-rows 5 --force-upload
+cat "$tmpdir/tty"
 
 echo "Showing an image without uploading"
 $upload_image --clear-id 9998 || true

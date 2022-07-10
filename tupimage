@@ -65,6 +65,10 @@ $script_name --fix. This behavior is desirable when images are displayed by
 automatic script running within tmux (tmux makes image uploading unreliable).
 
   General options:
+    -h
+        Show brief help.
+    --help
+        Show full help.
     -f <image_file>, --file <image_file>
         The image file (but you can specify it as a positional argument).
     --tty <file>
@@ -84,10 +88,6 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Save some information to <file> (like image id, rows, columns, etc).
     --abort-on-keypress
         Abort when there is an input from the user.
-    -h
-        Show brief help.
-    --help
-        Show full help.
 
   Display options:
     -c N, --columns N, --cols N
@@ -134,6 +134,11 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --no-tmux-hijack
         Do not try to hijack focus by creating a new pane when inside tmux and
         the current pane is not active (just fail instead).
+    --one-way
+        Assume one way communication with the terminal, i.e. do not request a
+        response and do not wait for it, just assume that all commands succeed.
+        Unreliable but useful when used from applications that prevent proper
+        communication with the terminal.
 
   Session database management:
     --fix [IDs], --reupload [IDs]
@@ -266,6 +271,7 @@ force_upload=""
 uploading_method="$TUPIMAGE_UPLOADING_METHOD"
 tmux_hijack_allowed="1"
 [[ -z "$TUPIMAGE_NO_TMUX_HIJACK" ]] || tmux_hijack_allowed=""
+one_way=""
 tmux_hijack_helper=""
 store_code=""
 store_pid=""
@@ -369,6 +375,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-tmux-hijack)
             tmux_hijack_allowed=""
+            shift
+            ;;
+        --one-way)
+            one_way=1
             shift
             ;;
         -m|--uploading-method)
@@ -566,17 +576,17 @@ echostatus() {
     if [[ -z "$quiet" ]]; then
         # Clear the current line
         if [[ -z "$start_x" ]]; then
-            echo -ne "\r" > "$tty"
-            echo -n "${eraser}" > "$tty"
-            echo -ne "\r" > "$tty"
+            echo -ne "\r" >> "$tty"
+            echo -n "${eraser}" >> "$tty"
+            echo -ne "\r" >> "$tty"
         else
             # If -x/-y are specified, move to the upper left corner first.
-            echo -en "\e[${start_y};${start_x}H" > "$tty"
-            echo -n "${eraser}" > "$tty"
-            echo -en "\e[${start_y};${start_x}H" > "$tty"
+            echo -en "\e[${start_y};${start_x}H" >> "$tty"
+            echo -n "${eraser}" >> "$tty"
+            echo -en "\e[${start_y};${start_x}H" >> "$tty"
         fi
         # And display the status. Truncate it if it's too long.
-        echo -n "$1" | colrm "$max_terminal_cols" > "$tty"
+        echo -n "$1" | colrm "$max_terminal_cols" >> "$tty"
     fi
 }
 
@@ -893,12 +903,16 @@ if [[ ! "$tmpdir" || ! -d "$tmpdir" ]]; then
     exit 1
 fi
 
-# We will need to disable echo during image uploading, otherwise the response
-# from the terminal containing the image id will get echoed. We will restore the
-# terminal settings on exit unless we get brutally killed.
-stty_orig="$(stty -g < "$tty")"
+# We will need to disable echo during image uploading, otherwise responses from
+# the terminal will get echoed. We will restore the terminal settings on exit
+# unless we get brutally killed. In one-way mode this is not required.
+if [[ -z "$one_way" ]]; then
+    stty_orig="$(stty -g < "$tty")"
+fi
 
 disable_echo() {
+    # In one-way communication mode this is not required.
+    [[ -z "$one_way" ]] || return
     stty -echo < "$tty"
     # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
     # horrible issues otherwise.
@@ -906,12 +920,16 @@ disable_echo() {
 }
 
 restore_echo() {
+    # In one-way communication mode this is not required.
+    [[ -z "$one_way" ]] || return
     stty $stty_orig < "$tty"
 }
 
 # Utility to read response from the terminal that we don't need anymore. (If we
 # don't read it it may end up being displayed which is not pretty).
 consume_errors() {
+    # In one-way communication mode this is not required.
+    [[ -z "$one_way" ]] || return
     while read -r -d '\' -t 0.1 term_response < "$tty"; do
         echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
     done
@@ -944,16 +962,18 @@ else
 fi
 
 start_gr_command() {
-    echo -en "$graphics_command_start" > "$tty"
+    echo -en "$graphics_command_start" >> "$tty"
 }
 end_gr_command() {
-    echo -en "$graphics_command_end" > "$tty"
+    echo -en "$graphics_command_end" >> "$tty"
 }
 
 # Send a graphics command with the correct start and end
 gr_command() {
     start_gr_command
-    echo -en "$1" > "$tty"
+    # In one-way mode disable any response (q=2).
+    [[ -z "$one_way" ]] || echo -n "q=2," >> "$tty"
+    echo -en "$1" >> "$tty"
     end_gr_command
     if [[ -n "$log" ]]; then
         local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
@@ -969,6 +989,11 @@ invalid_terminal_response() {
 # Get a response from the terminal and store it in term_response,
 # returns 1 if there is no response.
 get_terminal_response() {
+    if [[ -n "$one_way" ]]; then
+        # We shouldn't get here in one-way mode.
+        echoerr "Internal error: waiting for response in one-way mode"
+        exit 1
+    fi
     local response_timeout="$1"
     [[ -n "$response_timeout" ]] || response_timeout="$default_timeout"
     term_response=""
@@ -1087,10 +1112,11 @@ tmux_is_active_pane() {
 
 # Queries whether the given id is known by the terminal. Returns
 # - 0 if reuploading is needed,
-# - 1 if unknown (no response or in inactive tmux pane),
+# - 1 if unknown (no response or in inactive tmux pane or one-way mode),
 # - 2 if reuploading is not needed.
 # Usage: image_needs_reuploading "$image_id" "$cols" "$rows"
 image_needs_reuploading() {
+    [[ -z "$one_way" ]] || return 1
     local image_id="$1"
     local cols="$2"
     local rows="$3"
@@ -1152,6 +1178,11 @@ upload_image_impl() {
         echostatus "Trying file-based uploading"
         disable_echo
         gr_command "a=T,U=1,i=$image_id,f=100,t=f,c=${cols},r=${rows}${size_info};$(cat "$tmpdir/filename")"
+
+        if [[ -n "$one_way" ]]; then
+            echolog "Assuming uploading went well"
+            return 0
+        fi
 
         echostatus "Awaiting terminal response"
         get_terminal_response
@@ -1217,13 +1248,18 @@ upload_image_impl() {
         fi
         # The uploading of the chunk goes here.
         start_gr_command
-        echo -en "i=$image_id,m=1;" > "$tty"
-        cat $chunk > "$tty"
+        echo -en "i=$image_id,m=1;" >> "$tty"
+        cat $chunk >> "$tty"
         end_gr_command
     done
 
     # Tell the terminal that we are done.
     gr_command "i=$image_id,m=0"
+
+    if [[ -n "$one_way" ]]; then
+        echolog "Assuming uploading went well"
+        return 0
+    fi
 
     echostatus "Awaiting terminal response"
     get_terminal_response
@@ -1415,9 +1451,9 @@ get_cells_per_inch() {
     # Query the terminal to get the dimensions of a cell in pixels
     echolog "Getting cell width and height"
     if [[ -n "$inside_tmux" ]]; then
-        echo -en '\ePtmux;\e\e[16t\e\\' > "$tty"
+        echo -en '\ePtmux;\e\e[16t\e\\' >> "$tty"
     else
-        echo -en '\e[16t' > "$tty"
+        echo -en '\e[16t' >> "$tty"
     fi
     term_response=""
     if ! read -s -r -d 't' -t "$default_timeout" term_response < "$tty"; then
