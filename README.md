@@ -103,11 +103,6 @@ However, there are several issues you should be aware of:
 * Older versions of tmux may drop pass-through sequences when the terminal is
   too slow, making image uploading unreliable. This should be fixed in newer
   versions of tmux. See [this issue](https://github.com/tmux/tmux/issues/3001).
-* Tmux doesn't allow sending pass-through sequences from inactive panes.
-  If tupimage finds itself inside an inactive pane, it tries to hijack focus
-  by creating a pane of height 1. If that fails, the image can be uploaded later
-  with `tupimage --fix`. The focus hijacking may be annoying, you can disabling
-  it by setting `TUPIMAGE_NO_TMUX_HIJACK=1`.
 * It is recommended to run `tupimage --clear-term` before or immediately after
   attaching a tmux session to avoid displaying wrong images because of ID
   collision.
@@ -116,6 +111,15 @@ However, there are several issues you should be aware of:
   from the cache).
 * If tupimage freezes under tmux, make sure that the version of the tmux on your
   PATH is the same as the version of the running tmux server.
+* Tmux doesn't allow sending pass-through sequences from invisible panes and
+  cannot send the terminal response back to inactive panes. By default, if
+  tupimage finds itself inside an inactive or invisible pane, it switches to
+  one-way mode, which should help with inactive panes, but will probably fail
+  for invisible panes (the image can be uploaded later with `tupimage --fix`
+  though). There is another workaround which is to hijack focus by creating a
+  temporary pane of height 1. This focus hijacking may be annoying, so it's
+  disabled by default, you can enable it by setting `TUPIMAGE_TMUX_HIJACK=1` or
+  using the `--tmux-hijack` option.
 
 ## SSH support
 

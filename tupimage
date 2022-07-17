@@ -131,14 +131,25 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Do not upload the image (it can be done later using --fix).
     --force-upload
         (Re)upload the image even if it has been uploaded.
-    --no-tmux-hijack
-        Do not try to hijack focus by creating a new pane when inside tmux and
-        the current pane is not active (just fail instead).
     --one-way
         Assume one way communication with the terminal, i.e. do not request a
         response and do not wait for it, just assume that all commands succeed.
         Unreliable but useful when used from applications that prevent proper
         communication with the terminal.
+
+  Tmux workarounds:
+    --tmux-oneway
+    --no-tmux-oneway
+        Enable or disable switching to one-way communication when running in
+        inactive tmux panes. If disabled, tmux hijacking may be used instead
+        (unless also disabled). Enabled by default.
+    --tmux-hijack
+    --no-tmux-hijack
+        Enable or disable hijacking focus by creating a new tmux pane when
+        running in inactive tmux panes. Disabled by default.
+        When both tmux-oneway and tmux-hijack are enabled, one-way mode will be
+        used in inactive tmux panes, and tmux hijack will be used when running
+        in invisible tmux panes.
 
   Session database management:
     --fix [IDs], --reupload [IDs]
@@ -193,8 +204,12 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     TUPIMAGE_CACHE_DIR
         The directory to store images being uploaded (in case if they need to be
         reuploaded) and session databases.
-    TUPIMAGE_NO_TMUX_HIJACK
-        If set, disable tmux hijacking.
+    TUPIMAGE_TMUX_HIJACK
+        If set to 1, tmux hijacking is allowed (but not forced).
+        If set to 0, tmux hijacking is disabled (default).
+    TUPIMAGE_TMUX_ONEWAY
+        If set to 1, switch to one-way communication in inactive tmux panes
+        (default). If set to 0, do not switch to one-way communication.
     TUPIMAGE_UPLOADING_METHOD
         See --uploading-method.
     TUPIMAGE_CLEANUP_PROBABILITY
@@ -269,8 +284,10 @@ save_info=""
 no_upload=""
 force_upload=""
 uploading_method="$TUPIMAGE_UPLOADING_METHOD"
-tmux_hijack_allowed="1"
-[[ -z "$TUPIMAGE_NO_TMUX_HIJACK" ]] || tmux_hijack_allowed=""
+tmux_hijack=0
+[[ -z "$TUPIMAGE_TMUX_HIJACK" ]] || tmux_hijack="$TUPIMAGE_TMUX_HIJACK"
+tmux_oneway=1
+[[ -z "$TUPIMAGE_TMUX_ONEWAY" ]] || tmux_oneway="$TUPIMAGE_TMUX_ONEWAY"
 one_way=""
 tmux_hijack_helper=""
 store_code=""
@@ -373,8 +390,20 @@ while [[ $# -gt 0 ]]; do
             save_info="$2"
             shift 2
             ;;
+        --tmux-hijack)
+            tmux_hijack=1
+            shift
+            ;;
         --no-tmux-hijack)
-            tmux_hijack_allowed=""
+            tmux_hijack=0
+            shift
+            ;;
+        --tmux-oneway)
+            tmux_oneway=1
+            shift
+            ;;
+        --no-tmux-oneway)
+            tmux_oneway=0
             shift
             ;;
         --one-way)
@@ -505,6 +534,19 @@ done
 # Verify options, compute defaults
 #####################################################################
 
+# Normalizes boolean option values to "1" or empty string.
+normalize_bool() {
+    local lowercase="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lowercase" =~ ^(1|yes|true|on|enabled)$ ]]; then
+        echo "1"
+    elif [[ "$lowercase" =~ ^(0|no|false|off|disabled)$ ]]; then
+        return
+    else
+        echo "Invalid boolean value: $1" >&2
+        return 1
+    fi
+}
+
 if (( $command_count > 0 )); then
     if (( $command_count > 1 )); then
         echo "Only one command-like option may be specified" >&2
@@ -515,6 +557,11 @@ if (( $command_count > 0 )); then
         exit 1
     fi
 fi
+
+tmux_hijack="$(normalize_bool "$tmux_hijack")"
+[[ "$?" -eq 0 ]] || exit 1
+tmux_oneway="$(normalize_bool "$tmux_oneway")"
+[[ "$?" -eq 0 ]] || exit 1
 
 [[ -n "$uploading_method" ]] || uploading_method="auto"
 
@@ -1096,17 +1143,21 @@ upload_image() {
             return 0
         fi
     done
+    echoerr "All attempts to upload the image failed"
     return 1
 }
 
-# Checks if inside the active tmux pane.
-tmux_is_active_pane() {
+# Checks if inside the active tmux pane. Returns either 'active', 'inactive' or
+# 'invisible'.
+tmux_pane_status() {
     local tmux_active="$(tmux display-message -t $TMUX_PANE \
                             -p "#{window_active}#{pane_active}")"
     if [[ "$tmux_active" == "11" ]]; then
-        return 0
+        echo "active"
+    elif [[ "$tmux_active" == "10" ]]; then
+        echo "inactive"
     else
-        return 1
+        echo "invisible"
     fi
 }
 
@@ -1120,8 +1171,8 @@ image_needs_reuploading() {
     local image_id="$1"
     local cols="$2"
     local rows="$3"
-    if [[ -n "$inside_tmux" ]] && ! tmux_is_active_pane; then
-        # If we are in tmux, but not in an active pain, we can't get the
+    if [[ -n "$inside_tmux" ]] && [[ "$(tmux_pane_status)" != "active" ]]; then
+        # If we are in tmux, but not in an active pane, we can't get the
         # response quickly, so assume that we don't need reuploading.
         return 1
     fi
@@ -1148,13 +1199,35 @@ upload_image_impl() {
     local cols="$3"
     local rows="$4"
 
-    # Check if we are in the active tmux pane. Uploading images from inactive
-    # panes is impossible, so we either need to fail or to hijack focus by
-    # creating a new pane.
+    # Check if we are in the active tmux pane. To upload images from inactive
+    # panes we need to switch to one-way mode or hijack focus.
     if [[ -n "$inside_tmux" ]]; then
-        if ! tmux_is_active_pane; then
-            hijack_tmux "$image_id" "$tmpdir" "$cols" "$rows"
-            return $?
+        local pane_status="$(tmux_pane_status)"
+        echolog "Pane status: $pane_status"
+        if [[ "$pane_status" == "inactive" ]]; then
+            # Just inactive: use one-way mode if allowed, hijack if not.
+            if [[ -n "$tmux_oneway" ]]; then
+                echolog "Switching to one-way mode"
+                one_way=1
+            elif [[ -n "$tmux_hijack" ]]; then
+                hijack_tmux "$image_id" "$tmpdir" "$cols" "$rows"
+                return $?
+            else
+                echoerr "The pane is inactive and no workaround is allowed"
+                return 1
+            fi
+        elif [[ "$pane_status" == "invisible" ]]; then
+            # Invisible: hijack if allowed, otherwise use one-way mode.
+            if [[ -n "$tmux_hijack" ]]; then
+                hijack_tmux "$image_id" "$tmpdir" "$cols" "$rows"
+                return $?
+            elif [[ -n "$tmux_hijack" ]]; then
+                echolog "Switching to one-way mode"
+                one_way=1
+            else
+                echoerr "The pane is invisible and no workaround is allowed"
+                return 1
+            fi
         fi
     fi
 
@@ -1223,13 +1296,6 @@ upload_image_impl() {
         chunk_i=$((chunk_i+1))
         if [[ $((chunk_i % 10)) -eq 1 ]]; then
             check_keypress
-            # Check if we are still in the active pane
-            if [[ -n "$inside_tmux" ]]; then
-                if ! tmux_is_active_pane; then
-                    echoerr "Tmux pane became inactive, aborting the upload"
-                    return 1
-                fi
-            fi
             # Do not compute the speed too often
             if [[ $((chunk_i % 100)) -eq 1 ]]; then
                 # We use +%s%3N to show time in milliseconds
@@ -1261,6 +1327,22 @@ upload_image_impl() {
         return 0
     fi
 
+    # Check if we are still in the active pane
+    if [[ -n "$inside_tmux" ]]; then
+        if [[ "$(tmux_pane_status)" != "active" ]]; then
+            if [[ -n "$tmux_oneway" ]]; then
+                # If one-way mode workaround is allowed, it's not too late to
+                # pretend that we were in one-way mode. The terminal response
+                # has probably gone to the wrong pane though.
+                echolog "The pane became inactive, assuming uploading went well"
+                return 0
+            else
+                echoerr "The pane lost focus and one-way mode is not allowed"
+                return 1
+            fi
+        fi
+    fi
+
     echostatus "Awaiting terminal response"
     get_terminal_response
     restore_echo
@@ -1278,11 +1360,6 @@ hijack_tmux() {
     local tmpdir="$2"
     local cols="$3"
     local rows="$4"
-
-    if [[ -z "$tmux_hijack_allowed" ]]; then
-        echoerr "Not in active pane and tmux hijacking is not allowed"
-        return 1
-    fi
 
     echostatus "Not in active pane, hijacking tmux"
     local tmp_pid="$(mktemp)"
@@ -1347,7 +1424,7 @@ hijack_tmux() {
 
 if [[ -n "$tmux_hijack_helper" ]]; then
     # Do not allow any more hijack attempts.
-    tmux_hijack_allowed=""
+    tmux_hijack=""
     upload_image_impl "$image_id" "$file" "$cols" "$rows"
     ret_code="$?"
     echo "$ret_code" > "$store_code"
