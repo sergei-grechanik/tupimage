@@ -1221,7 +1221,7 @@ upload_image_impl() {
             if [[ -n "$tmux_hijack" ]]; then
                 hijack_tmux "$image_id" "$tmpdir" "$cols" "$rows"
                 return $?
-            elif [[ -n "$tmux_hijack" ]]; then
+            elif [[ -n "$tmux_oneway" ]]; then
                 echolog "Switching to one-way mode"
                 one_way=1
             else
