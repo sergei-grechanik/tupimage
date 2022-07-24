@@ -77,7 +77,7 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     -e <file>, --err <file>
         Use <file> to output error messages in addition to displaying them as
         the status.
-    -l <file>, --log <file>
+    --log <file>
         Enable logging and write logs to <file>.
     -V
         Same as --log /dev/stderr (i.e. be very verbose).
@@ -91,9 +91,9 @@ automatic script running within tmux (tmux makes image uploading unreliable).
 
   Display options:
     -c N, --columns N, --cols N
-    -r N, --rows N
-        The number of columns and rows for the image. By default the script will
-        try to compute the optimal values by itself.
+    -r N, --rows N, -l N, --lines N
+        The number of columns and rows (aka lines) for the image. By default the
+        script will try to compute the optimal values by itself.
     -x COLUMN, -y LINE
         Place the image and the status line at the given absolute coordinates.
         The coordinates are 1-based. Note that the output will use ANSI cursor
@@ -314,7 +314,7 @@ while [[ $# -gt 0 ]]; do
             cols="$2"
             shift 2
             ;;
-        -r|--rows)
+        -r|--rows|-l|--lines)
             rows="$2"
             shift 2
             ;;
@@ -338,7 +338,7 @@ while [[ $# -gt 0 ]]; do
             tty="$2"
             shift 2
             ;;
-        -l|--log)
+        --log)
             log="$2"
             shift 2
             ;;
@@ -1372,7 +1372,7 @@ hijack_tmux() {
         -c "$cols" \
         -r "$rows" \
         -e "$tmp_err" \
-        -l "$log" \
+        --log "$log" \
         -f "$tmpdir" \
         --id "$image_id" \
         --store-pid "$tmp_pid" \

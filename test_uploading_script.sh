@@ -77,10 +77,10 @@ for i in $(seq 1 5); do
     $upload_image _data/wikipedia.png -c $i
 done
 
-echo "Testing -r and -c and output to a file (4 x 6 images)"
+echo "Testing -r (-l) and -c and output to a file (4 x 6 images)"
 for rows in $(seq 1 4); do
     for cols in $(seq 1 6); do
-        $upload_image _data/tux.png -r $rows -c $cols -o "$tmpdir/cols_$cols"
+        $upload_image _data/tux.png -l $rows -c $cols -o "$tmpdir/cols_$cols"
     done
     paste -d "" "$tmpdir"/cols_*
     rm "$tmpdir"/cols_*
@@ -93,7 +93,7 @@ done
 cat "$tmpdir/img"
 
 echo "Test saving id and showing id"
-$upload_image _data/tux.png -r 2 --save-info "$tmpdir/info" -o /dev/null
+$upload_image _data/tux.png --lines 2 --save-info "$tmpdir/info" -o /dev/null
 cat "$tmpdir/info"
 image_id="$(grep id "$tmpdir/info" | cut -f 2)"
 echo $image_id
