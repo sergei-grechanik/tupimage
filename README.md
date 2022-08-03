@@ -93,6 +93,12 @@ tmux in your `.tmux.conf`:
 
     set -gq allow-passthrough
 
+If you are using the latest version of tmux (>=3.4, you need to have [this
+commit](https://github.com/tmux/tmux/commit/42ba6c1b229c92256274e848e9c5ff1d59d9081b)),
+it's even better to set this option to `all` to allow invisible panes:
+
+    set -gq allow-passthrough all
+
 Tupimage mostly supports tmux: image uploading commands are wrapped in
 pass-through sequences (`^[Ptmux`), and image placement is indicated via Unicode
 character with diacritics and color attributes, which are supported by tmux.
@@ -111,15 +117,15 @@ However, there are several issues you should be aware of:
   from the cache).
 * If tupimage freezes under tmux, make sure that the version of the tmux on your
   PATH is the same as the version of the running tmux server.
-* Tmux doesn't allow sending pass-through sequences from invisible panes and
-  cannot send the terminal response back to inactive panes. By default, if
-  tupimage finds itself inside an inactive or invisible pane, it switches to
-  one-way mode, which should help with inactive panes, but will probably fail
-  for invisible panes (the image can be uploaded later with `tupimage --fix`
-  though). There is another workaround which is to hijack focus by creating a
-  temporary pane of height 1. This focus hijacking may be annoying, so it's
-  disabled by default, you can enable it by setting `TUPIMAGE_TMUX_HIJACK=1` or
-  using the `--tmux-hijack` option.
+* Tmux doesn't allow sending pass-through sequences from invisible panes (unless
+  `allow-passthrough` is `all`) and cannot send the terminal response back to
+  inactive panes. By default, if tupimage finds itself inside an inactive or
+  invisible pane, it switches to one-way mode, which should help with inactive
+  panes, but will probably fail for invisible panes (the image can be uploaded
+  later with `tupimage --fix` though). There is another workaround which is to
+  hijack focus by creating a temporary pane of height 1. This focus hijacking
+  may be annoying, so it's disabled by default, you can enable it by setting
+  `TUPIMAGE_TMUX_HIJACK=1` or using the `--tmux-hijack` option.
 
 ## SSH support
 
