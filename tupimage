@@ -194,6 +194,9 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --override-ppi N
         Override ppi value for the image (both vertical and horizontal). By
         default ppi values will be requested using the 'identify' utility.
+    --only-dump-dims
+        Do not upload the image and do not allocate an id, just compute the
+        number of columns and rows and write them to stdout.
 
   Environment variables:
     TUPIMAGE_COLS_PER_INCH
@@ -292,6 +295,7 @@ one_way=""
 tmux_hijack_helper=""
 store_code=""
 store_pid=""
+only_dump_dims=""
 last_n=""
 
 reupload=""
@@ -389,6 +393,10 @@ while [[ $# -gt 0 ]]; do
         --save-info)
             save_info="$2"
             shift 2
+            ;;
+        --only-dump-dims)
+            only_dump_dims=1
+            shift
             ;;
         --tmux-hijack)
             tmux_hijack=1
@@ -716,7 +724,7 @@ session_id="$terminal_id"
 
 # This variable indicates whether we are inside tmux.
 inside_tmux=""
-if [[ -n "$TMUX" ]] && [[ "$TERM" =~ "screen" ]]; then
+if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]] && [[ "$TERM" =~ "screen" ]]; then
     inside_tmux="1"
     # Get the actual current terminal name from tmux.
     actual_term="$(tmux display-message -p "#{client_termname}")"
@@ -1848,6 +1856,11 @@ echolog "Image size columns: $cols, rows: $rows"
 
 # Save the number of rows and columns.
 [[ -z "$save_info" ]] || echo -e "columns\t$cols\nrows\t$rows" >> "$save_info"
+
+if [[ -n "$only_dump_dims" ]]; then
+    echo "$cols $rows"
+    exit 0
+fi
 
 #####################################################################
 # Helper functions for finding image ids
