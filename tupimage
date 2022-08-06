@@ -564,6 +564,17 @@ if (( $command_count > 0 )); then
         echo "File cannot be specified together with a command-like option" >&2
         exit 1
     fi
+else
+    # No command means we want to upload and display an image. Check that the
+    # file is specified and exists.
+    if [[ -z "$file" ]]; then
+        echo "File not specified" >&2
+        exit 1
+    fi
+    if ! [[ -f "$file" ]]; then
+        echo "File not found: $file (pwd: $(pwd))" >&2
+        exit 1
+    fi
 fi
 
 tmux_hijack="$(normalize_bool "$tmux_hijack")"
@@ -686,6 +697,91 @@ if [[ -n "$store_pid" ]]; then
     echolog "Storing $$ to $store_pid"
     echo "$$" > "$store_pid"
 fi
+
+[[ -z "$file" ]] || echolog "Image file: $file (pwd: $(pwd))"
+
+#####################################################################
+# Compute the number of rows and columns
+#####################################################################
+
+# Compute a formula with bc and round to the nearest integer.
+bc_round() {
+    echo "$(LC_NUMERIC=C printf %.0f "$(echo "scale=2;($1) + 0.5" | bc)")"
+}
+
+if [[ -n "$file" ]] && [[ -z "$cols" || -z "$rows" ]]; then
+    # Default values of rows per inch and columns per inch.
+    [[ -n "$cols_per_inch" ]] || cols_per_inch=12.0
+    [[ -n "$rows_per_inch" ]] || rows_per_inch=6.0
+    # Get the size of the image and its resolution
+    props=($(identify -format '%w %h %x %y' -units PixelsPerInch "$file"))
+    if [[ "${#props[@]}" -ne 4 ]]; then
+        echoerr "Couldn't get result from identify"
+        exit 1
+    fi
+    if [[ -n "$override_ppi" ]]; then
+        props[2]="$override_ppi"
+        props[3]="$override_ppi"
+    fi
+    echolog "Image pixel width: ${props[0]} pixel height: ${props[1]}"
+    echolog "Image x ppi: ${props[2]} y ppi: ${props[3]}"
+    echolog "Columns per inch: ${cols_per_inch} Rows per inch: ${rows_per_inch}"
+    opt_cols_expr="(${props[0]}*${cols_per_inch}/${props[2]})"
+    opt_rows_expr="(${props[1]}*${rows_per_inch}/${props[3]})"
+    cols_auto_computed=""
+    rows_auto_computed=""
+    if [[ -z "$cols" && -z "$rows" ]]; then
+        # If columns and rows are not specified, compute the optimal values
+        # using the information about rows and columns per inch.
+        cols="$(bc_round "$opt_cols_expr")"
+        rows="$(bc_round "$opt_rows_expr")"
+        cols_auto_computed=1
+        rows_auto_computed=1
+    elif [[ -z "$cols" ]]; then
+        # If only one dimension is specified, compute the other one to match the
+        # aspect ratio as close as possible.
+        cols="$(bc_round "${opt_cols_expr}*${rows}/${opt_rows_expr}")"
+        cols_auto_computed=1
+    elif [[ -z "$rows" ]]; then
+        rows="$(bc_round "${opt_rows_expr}*${cols}/${opt_cols_expr}")"
+        rows_auto_computed=1
+    fi
+
+    echolog "Image size before applying min/max columns: $cols, rows: $rows"
+    # Make sure that automatically computed rows and columns are within some
+    # sane limits
+    if [[ -n "$cols_auto_computed" ]] && (( cols > max_cols )); then
+        rows="$(bc_round "$rows * $max_cols / $cols")"
+        cols="$max_cols"
+    fi
+    if [[ -n "$rows_auto_computed" ]] && (( rows > max_rows )); then
+        cols="$(bc_round "$cols * $max_rows / $rows")"
+        rows="$max_rows"
+    fi
+    if (( cols < 1 )); then
+        cols=1
+    fi
+    if (( rows < 1 )); then
+        rows=1
+    fi
+fi
+
+[[ -z "$rows" ]] || rows="$((10#$rows))"
+[[ -z "$cols" ]] || cols="$((10#$cols))"
+
+echolog "Image size columns: $cols, rows: $rows"
+
+# Save the number of rows and columns.
+[[ -z "$save_info" ]] || echo -e "columns\t$cols\nrows\t$rows" >> "$save_info"
+
+if [[ -n "$only_dump_dims" ]]; then
+    echo "$cols $rows"
+    exit 0
+fi
+
+#####################################################################
+# Keypress checking
+#####################################################################
 
 check_keypress() {
     if [[ -n "$abort_on_keypress" ]]; then
@@ -1768,97 +1864,6 @@ if [[ -n "$cmd_list_images" ]]; then
         display_image "$id" "$im_cols" "$im_rows"
         echoout ""
     done
-    exit 0
-fi
-
-#####################################################################
-# Compute the number of rows and columns
-#####################################################################
-
-# Check if the file exists.
-if [[ -z "$file" ]]; then
-    echoerr "File not specified"
-    exit 1
-fi
-if ! [[ -f "$file" ]]; then
-    echoerr "File not found: $file (pwd: $(pwd))"
-    exit 1
-fi
-
-echolog "Image file: $file (pwd: $(pwd))"
-
-# Compute a formula with bc and round to the nearest integer.
-bc_round() {
-    echo "$(LC_NUMERIC=C printf %.0f "$(echo "scale=2;($1) + 0.5" | bc)")"
-}
-
-if [[ -z "$cols" || -z "$rows" ]]; then
-    # Default values of rows per inch and columns per inch.
-    [[ -n "$cols_per_inch" ]] || cols_per_inch=12.0
-    [[ -n "$rows_per_inch" ]] || rows_per_inch=6.0
-    # Get the size of the image and its resolution
-    props=($(identify -format '%w %h %x %y' -units PixelsPerInch "$file"))
-    if [[ "${#props[@]}" -ne 4 ]]; then
-        echoerr "Couldn't get result from identify"
-        exit 1
-    fi
-    if [[ -n "$override_ppi" ]]; then
-        props[2]="$override_ppi"
-        props[3]="$override_ppi"
-    fi
-    echolog "Image pixel width: ${props[0]} pixel height: ${props[1]}"
-    echolog "Image x ppi: ${props[2]} y ppi: ${props[3]}"
-    echolog "Columns per inch: ${cols_per_inch} Rows per inch: ${rows_per_inch}"
-    opt_cols_expr="(${props[0]}*${cols_per_inch}/${props[2]})"
-    opt_rows_expr="(${props[1]}*${rows_per_inch}/${props[3]})"
-    cols_auto_computed=""
-    rows_auto_computed=""
-    if [[ -z "$cols" && -z "$rows" ]]; then
-        # If columns and rows are not specified, compute the optimal values
-        # using the information about rows and columns per inch.
-        cols="$(bc_round "$opt_cols_expr")"
-        rows="$(bc_round "$opt_rows_expr")"
-        cols_auto_computed=1
-        rows_auto_computed=1
-    elif [[ -z "$cols" ]]; then
-        # If only one dimension is specified, compute the other one to match the
-        # aspect ratio as close as possible.
-        cols="$(bc_round "${opt_cols_expr}*${rows}/${opt_rows_expr}")"
-        cols_auto_computed=1
-    elif [[ -z "$rows" ]]; then
-        rows="$(bc_round "${opt_rows_expr}*${cols}/${opt_cols_expr}")"
-        rows_auto_computed=1
-    fi
-
-    echolog "Image size before applying min/max columns: $cols, rows: $rows"
-    # Make sure that automatically computed rows and columns are within some
-    # sane limits
-    if [[ -n "$cols_auto_computed" ]] && (( cols > max_cols )); then
-        rows="$(bc_round "$rows * $max_cols / $cols")"
-        cols="$max_cols"
-    fi
-    if [[ -n "$rows_auto_computed" ]] && (( rows > max_rows )); then
-        cols="$(bc_round "$cols * $max_rows / $rows")"
-        rows="$max_rows"
-    fi
-    if (( cols < 1 )); then
-        cols=1
-    fi
-    if (( rows < 1 )); then
-        rows=1
-    fi
-fi
-
-rows="$((10#$rows))"
-cols="$((10#$cols))"
-
-echolog "Image size columns: $cols, rows: $rows"
-
-# Save the number of rows and columns.
-[[ -z "$save_info" ]] || echo -e "columns\t$cols\nrows\t$rows" >> "$save_info"
-
-if [[ -n "$only_dump_dims" ]]; then
-    echo "$cols $rows"
     exit 0
 fi
 
