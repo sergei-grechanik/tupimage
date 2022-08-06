@@ -544,6 +544,14 @@ done
 
 # Normalizes boolean option values to "1" or empty string.
 normalize_bool() {
+    if [[ "$1" == "1" ]]; then
+        echo "1"
+        return
+    fi
+    if [[ "$1" == "0" ]]; then
+        return
+    fi
+
     local lowercase="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
     if [[ "$lowercase" =~ ^(1|yes|true|on|enabled)$ ]]; then
         echo "1"
