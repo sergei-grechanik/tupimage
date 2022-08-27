@@ -1904,8 +1904,12 @@ find_image_id() {
     if [[ -e "$inst_file" ]]; then
         image_id="$(head -1 "$inst_file")"
         if ! is_image_id_correct "$image_id"; then
-            echoerr "Found invalid image_id $image_id in $inst_file, please remove it manually"
-            return 1
+            echoerr "Found invalid image_id $image_id in $inst_file, removing"
+            rm "$inst_file"
+        elif [[ -e "$terminal_dir/$image_id" ]] &&
+             [[ "$(head -1 "$terminal_dir/$image_id")" != "$img_instance" ]]; then
+            echoerr "Found outdated image id $image_id in $inst_file, removing"
+            rm "$inst_file"
         else
             touch "$inst_file"
             echolog "Found an existing image id $image_id"
@@ -1942,7 +1946,7 @@ find_image_id() {
                 oldest_file="$inst_file"
             fi
         done
-        image_id="$(head -1 "$inst_file")"
+        image_id="$(head -1 "$oldest_file")"
         echolog "Recuperating the id $image_id from $oldest_file"
         rm "$oldest_file"
         return 0
