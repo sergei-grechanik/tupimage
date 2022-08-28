@@ -316,26 +316,39 @@ cmd_get_cells_per_inch=""
 
 command_count=0
 
+# Usage: validate_int "$1" "$2"
+validate_int() {
+    if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "Invalid integer value for $1: $2" >&2
+        exit 1
+    fi
+}
+
 # Parse the command line.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -c|--columns|--cols)
+            validate_int "$1" "$2"
             cols="$2"
             shift 2
             ;;
         -r|--rows|-l|--lines)
+            validate_int "$1" "$2"
             rows="$2"
             shift 2
             ;;
         -x)
+            validate_int "$1" "$2"
             start_x="$2"
             shift 2
             ;;
         -y)
+            validate_int "$1" "$2"
             start_y="$2"
             shift 2
             ;;
         --max-terminal-cols)
+            validate_int "$1" "$2"
             max_terminal_cols="$2"
             shift 2
             ;;
@@ -385,6 +398,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --id)
+            validate_int "$1" "$2"
             image_id="$2"
             shift 2
             ;;
@@ -441,10 +455,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --max-cols)
+            validate_int "$1" "$2"
             max_cols="$2"
             shift 2
             ;;
         --max-rows)
+            validate_int "$1" "$2"
             max_rows="$2"
             if (( max_rows > 255 )); then
                 echo "--max-rows cannot be larger than 255 ($2 is specified)" >&2
@@ -465,6 +481,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --last)
+            validate_int "$1" "$2"
             last_n="$2"
             shift 2
             ;;
@@ -490,6 +507,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --clear-id)
+            validate_int "$1" "$2"
             cmd_clear_id="$2"
             ((command_count++))
             shift 2
@@ -505,6 +523,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --show-id)
+            validate_int "$1" "$2"
             cmd_show_id="$2"
             if [[ -z "$cmd_show_id" ]]; then
                 echo "No id specified" >&2
