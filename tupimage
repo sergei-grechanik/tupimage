@@ -94,10 +94,6 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     -r N, --rows N, -l N, --lines N
         The number of columns and rows (aka lines) for the image. By default the
         script will try to compute the optimal values by itself.
-    -x COLUMN, -y LINE
-        Place the image and the status line at the given absolute coordinates.
-        The coordinates are 1-based. Note that the output will use ANSI cursor
-        movement sequences instead of \\n.
     -o <file>, --out <file>, --output <file>
         Use <file> to output the characters representing the image, instead of
         stdout.
@@ -111,6 +107,13 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --show-id N
         Display the image with the given id. The image will be reuploaded if
         needed.
+    -x COLUMN, -y LINE
+        Place the image and the status line at the given absolute coordinates.
+        The coordinates are 1-based. Note that the output will use ANSI cursor
+        movement sequences instead of \\n, unless redirected with -o.
+    --max-terminal-cols N
+        The maximum number of columns to use for the status message. If not
+        specified, it will be computed automatically.
 
   ID assignment options:
     --id N
@@ -297,6 +300,8 @@ store_code=""
 store_pid=""
 only_dump_dims=""
 last_n=""
+use_linefeed=""
+max_terminal_cols=""
 
 reupload=""
 reupload_ids=()
@@ -330,8 +335,13 @@ while [[ $# -gt 0 ]]; do
             start_y="$2"
             shift 2
             ;;
+        --max-terminal-cols)
+            max_terminal_cols="$2"
+            shift 2
+            ;;
         -o|--out|--output)
             out="$2"
+            use_linefeed=1
             shift 2
             ;;
         -e|--err)
@@ -605,9 +615,11 @@ fi
 
 # The number of terminal columns starting from the upper left corner. This value
 # is used when displaying the status message so that we take only 1 line.
-max_terminal_cols="$(tput cols)"
-if [[ -n "$start_x" ]]; then
-    max_terminal_cols="$(( "$max_terminal_cols" - "$start_x" + 1 ))"
+if [[ -z "$max_terminal_cols" ]]; then
+    max_terminal_cols="$(tput cols)"
+    if [[ -n "$start_x" ]]; then
+        max_terminal_cols="$(( "$max_terminal_cols" - "$start_x" + 1 ))"
+    fi
 fi
 
 # Write max_terminal_cols spaces to `eraser`. It will be used to erase the status line.
@@ -950,9 +962,14 @@ display_image() {
     echostatus
 
     # If we are requested to display the image at the given absolute
-    # coordinates, we will use ANSI cursor movement codes, otherwise just append
-    # \n to line_end.
-    if [[ -z "$start_x" ]]; then
+    # coordinates, we will use ANSI cursor movement codes instead of \n, unless
+    # the output is redirected with -o.
+    if [[ -z "$use_linefeed" ]] && [[ -z "$start_x" ]]; then
+        use_linefeed=1
+    fi
+
+    # Use linefeed means \n at the end f each line.
+    if [[ -n "$use_linefeed" ]]; then
         printf -v line_end '%s\n' "$line_end"
     fi
 
@@ -962,7 +979,7 @@ display_image() {
             check_keypress
         fi
         # If we are using absolute positioning, explicitly move the cursor.
-        if [[ -n "$start_x" ]]; then
+        if [[ -z "$use_linefeed" ]]; then
             echo -en "\e[$(("$start_y" + "$y"));${start_x}H"
         fi
         echo -n "$line_start"
