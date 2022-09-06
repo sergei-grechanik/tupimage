@@ -719,6 +719,24 @@ echoerr() {
 }
 
 #####################################################################
+# Keypress checking
+#####################################################################
+
+check_keypress() {
+    if [[ -n "$abort_on_keypress" ]]; then
+        read_character=""
+        if read -n 1 -t 0.001 read_character < "$tty"; then
+            if [[ -n "$read_character" ]]; then
+                echoerr "Aborted on key press"
+                exit 1
+            fi
+        fi
+    fi
+}
+
+check_keypress
+
+#####################################################################
 # Some basic initialization
 #####################################################################
 
@@ -861,30 +879,14 @@ consume_errors() {
 cleanup() {
     consume_errors
     restore_echo
-    [[ -z "$tmpdir" ]] || rm "$tmpdir/"* 2> /dev/null
-    rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
+    if [[ -n "$tmpdir" ]]; then
+        rm "$tmpdir/"* 2> /dev/null
+        rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
+    fi
 }
 
 # Register the cleanup function to be called on the EXIT signal.
 trap cleanup EXIT TERM
-
-#####################################################################
-# Keypress checking
-#####################################################################
-
-check_keypress() {
-    if [[ -n "$abort_on_keypress" ]]; then
-        read_character=""
-        if read -n 1 -t 0.001 read_character < "$tty"; then
-            if [[ -n "$read_character" ]]; then
-                echoerr "Aborted on key press"
-                exit 1
-            fi
-        fi
-    fi
-}
-
-check_keypress
 
 #####################################################################
 # Detecting tmux and figuring out the actual terminal name
