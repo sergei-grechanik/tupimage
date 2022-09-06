@@ -819,6 +819,56 @@ if [[ -n "$only_dump_dims" ]]; then
 fi
 
 #####################################################################
+# Adjusting the terminal state
+#####################################################################
+
+stty_orig=""
+
+disable_echo() {
+    stty -echo < "$tty"
+    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
+    # horrible issues otherwise.
+    stty susp undef < "$tty"
+}
+
+restore_echo() {
+    [[ -n "$stty_orig" ]] || return
+    stty $stty_orig < "$tty"
+}
+
+# We will need to disable echo during image uploading, otherwise responses from
+# the terminal will get echoed. We will restore the terminal settings on exit
+# unless we get brutally killed. We do this even in one-way mode because echo
+# may damage the uploading when used from tmux. The only exception is when $tty
+# is not a tty.
+if [[ -t 1 ]] >> "$tty"; then
+    stty_orig="$(stty -g < "$tty")"
+    disable_echo
+fi
+
+# Utility to read response from the terminal that we don't need anymore. (If we
+# don't read it it may end up being displayed which is not pretty).
+consume_errors() {
+    # In one-way communication mode this is not required.
+    [[ -z "$one_way" ]] || return
+    while read -r -d '\' -t 0.1 term_response < "$tty"; do
+        echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
+    done
+}
+
+# On exit restore terminal settings, consume possible errors from the terminal
+# and remove the temporary directory.
+cleanup() {
+    consume_errors
+    restore_echo
+    [[ -z "$tmpdir" ]] || rm "$tmpdir/"* 2> /dev/null
+    rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
+}
+
+# Register the cleanup function to be called on the EXIT signal.
+trap cleanup EXIT TERM
+
+#####################################################################
 # Keypress checking
 #####################################################################
 
@@ -1087,7 +1137,7 @@ cleanup_cache() {
 }
 
 #####################################################################
-# Creating a temp dir and adjusting the terminal state
+# Creating a temp dir
 #####################################################################
 
 # Create a temporary directory to store the chunked image.
@@ -1097,50 +1147,6 @@ if [[ ! "$tmpdir" || ! -d "$tmpdir" ]]; then
     echoerr "Can't create a temp dir"
     exit 1
 fi
-
-# We will need to disable echo during image uploading, otherwise responses from
-# the terminal will get echoed. We will restore the terminal settings on exit
-# unless we get brutally killed. In one-way mode this is not required.
-if [[ -z "$one_way" ]]; then
-    stty_orig="$(stty -g < "$tty")"
-fi
-
-disable_echo() {
-    # In one-way communication mode this is not required.
-    [[ -z "$one_way" ]] || return
-    stty -echo < "$tty"
-    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
-    # horrible issues otherwise.
-    stty susp undef < "$tty"
-}
-
-restore_echo() {
-    # In one-way communication mode this is not required.
-    [[ -z "$one_way" ]] || return
-    stty $stty_orig < "$tty"
-}
-
-# Utility to read response from the terminal that we don't need anymore. (If we
-# don't read it it may end up being displayed which is not pretty).
-consume_errors() {
-    # In one-way communication mode this is not required.
-    [[ -z "$one_way" ]] || return
-    while read -r -d '\' -t 0.1 term_response < "$tty"; do
-        echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
-    done
-}
-
-# On exit restore terminal settings, consume possible errors from the terminal
-# and remove the temporary directory.
-cleanup() {
-    consume_errors
-    restore_echo
-    [[ -z "$tmpdir" ]] || rm "$tmpdir/"* 2> /dev/null
-    rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
-}
-
-# Register the cleanup function to be called on the EXIT signal.
-trap cleanup EXIT TERM
 
 #####################################################################
 # Helper functions for image uploading
@@ -1397,7 +1403,6 @@ upload_image_impl() {
     # Try sending the filename if there is the encoded filename
     if [[ -e "$tmpdir/filename" ]]; then
         echostatus "Trying file-based uploading"
-        disable_echo
         gr_command "a=T,U=1,i=$image_id,f=100,t=f,c=${cols},r=${rows}${size_info};$(cat "$tmpdir/filename")"
 
         if [[ -n "$one_way" ]]; then
@@ -1407,7 +1412,6 @@ upload_image_impl() {
 
         echostatus "Awaiting terminal response"
         get_terminal_response
-        restore_echo
         if [[ -n "$term_response_ok" ]]; then
             return 0
         fi
@@ -1435,7 +1439,6 @@ upload_image_impl() {
     # o=z    use compression (not used here)
     # m=1    multi-chunked data
     # S=     original file size
-    disable_echo
     gr_command "a=T,U=1,i=$image_id,f=100,t=d,c=${cols},r=${rows},m=1${size_info}"
 
     # Transmit chunks and display progress.
@@ -1493,7 +1496,6 @@ upload_image_impl() {
 
     echostatus "Awaiting terminal response"
     get_terminal_response
-    restore_echo
     if [[ -z "$term_response_ok" ]]; then
         echoerr "Uploading error: $term_response_printable"
         return 1

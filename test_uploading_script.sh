@@ -146,7 +146,10 @@ echo "Testing one-way mode with direct method"
 $upload_image _data/tux.png --rows 3 --one-way -m direct --force-upload
 
 echo "Testing one-way mode with a file instead of tty (may fail)"
-$upload_image _data/earth.jpg --tty "$tmpdir/tty" --one-way --max-cols 5 --max-rows 5 --force-upload
+echo "placeholder for the image:"
+$upload_image _data/earth.jpg --tty "$tmpdir/tty" --one-way -c 11 -r 5 --force-upload
+echo "waiting 1 s and uploading:"
+sleep 1
 cat "$tmpdir/tty"
 
 echo "Showing an image without uploading"
