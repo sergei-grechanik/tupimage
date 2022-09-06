@@ -73,15 +73,21 @@ experimental, not much documentation.
 Fzf prevents proper two-way communication with the terminal (if you know how to
 work around it, please tell me). Try the one-way mode:
 
-    fzf --preview 'tupimage --less-diacritics -q --one-way --max-cols $FZF_PREVIEW_COLUMNS --max-rows $FZF_PREVIEW_LINES {}'
+    fzf --preview 'tupimage --less-diacritics -q --keep-echo --one-way --max-cols $FZF_PREVIEW_COLUMNS --max-rows $FZF_PREVIEW_LINES {}'
 
-(`--less-diacritics` is optional, `-q` disables uploading status line).
-It's not very reliable since the response from the terminal is not checked.
-Sometimes tupimage will think that the image is already uploaded and won't try
-to reupload it again, although the reuploading might have failed and you see an
-empty box. You can try to force reuploading each time to fix this:
+(`--less-diacritics` is optional, `-q` disables the uploading status line,
+`--keep-echo` disables disabling echo, which is problematic in fzf for some
+reason). There is also a shortcut option `--fzf` that enables all of that
+(except for --less-diacritics):
 
-    fzf --preview 'tupimage --force-upload --less-diacritics -q --one-way --max-cols $FZF_PREVIEW_COLUMNS --max-rows $FZF_PREVIEW_LINES {}'
+    fzf --preview 'tupimage --less-diacritics --fzf {}'
+
+One-way mode may be unreliable since the response from the terminal is not
+checked. Sometimes tupimage will think that the image is already uploaded and
+won't try to reupload it again, although the reuploading might have failed and
+you see an empty box. You can try to force reuploading each time to fix this:
+
+    fzf --preview 'tupimage --force-upload --less-diacritics --fzf {}'
 
 Also, older versions of fzf seem to have problems with unicode symbol width, so
 you may need to update it.

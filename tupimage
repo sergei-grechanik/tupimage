@@ -88,6 +88,11 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Save some information to <file> (like image id, rows, columns, etc).
     --abort-on-keypress
         Abort when there is an input from the user.
+    --keep-echo
+        Do not disable echo with stty.
+    --fzf
+        Same as --max-cols \$FZF_PREVIEW_COLUMNS --max-rows \$FZF_PREVIEW_LINES
+        -q --keep-echo --one-way.
 
   Display options:
     -c N, --columns N, --cols N
@@ -284,6 +289,7 @@ tty="/dev/tty"
 log=""
 quiet=""
 abort_on_keypress=""
+keep_echo=""
 noesc=""
 less_diacritics=""
 save_info=""
@@ -379,6 +385,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --abort-on-keypress)
             abort_on_keypress=1
+            shift
+            ;;
+        --keep-echo)
+            keep_echo=1
+            shift
+            ;;
+        --fzf)
+            one_way=1
+            keep_echo=1
+            quiet=1
+            max_cols="$FZF_PREVIEW_COLUMNS"
+            max_rows="$FZF_PREVIEW_LINES"
             shift
             ;;
         -h)
@@ -858,10 +876,13 @@ restore_echo() {
 # the terminal will get echoed. We will restore the terminal settings on exit
 # unless we get brutally killed. We do this even in one-way mode because echo
 # may damage the uploading when used from tmux. The only exception is when $tty
-# is not a tty.
-if [[ -t 1 ]] >> "$tty"; then
-    stty_orig="$(stty -g < "$tty")"
-    disable_echo
+# is not a tty or when the user requested to keep echo on.
+if [[ -z "$keep_echo" ]]; then
+    if [[ -t 1 ]] >> "$tty"; then
+        echolog "In tty, disabling echo"
+        stty_orig="$(stty -g < "$tty")"
+        disable_echo
+    fi
 fi
 
 # Utility to read response from the terminal that we don't need anymore. (If we
@@ -877,6 +898,7 @@ consume_errors() {
 # On exit restore terminal settings, consume possible errors from the terminal
 # and remove the temporary directory.
 cleanup() {
+    echolog "Cleaning up"
     consume_errors
     restore_echo
     if [[ -n "$tmpdir" ]]; then
@@ -912,6 +934,7 @@ session_id="$terminal_id"
 # This variable indicates whether we are inside tmux.
 inside_tmux=""
 if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]] && [[ "$TERM" =~ "screen" ]]; then
+    echolog "Inside tmux, getting info from tmux"
     inside_tmux="1"
     # Get the actual current terminal name from tmux.
     actual_term="$(tmux display-message -p "#{client_termname}")"
