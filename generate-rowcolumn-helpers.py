@@ -60,6 +60,39 @@ with open("./rowcolumn_diacritics_helpers.c", "w") as file:
     print("\treturn 0;", file=file)
     print("}", file=file)
 
+print("Generating ./rowcolumn_diacritics_helpers.rs")
+with open("./rowcolumn_diacritics_helpers.rs", "w") as file:
+    range_start_num = 1
+    range_start = 0
+    range_end = 0
+
+    def print_range():
+        if range_start >= range_end:
+            return
+        print("        " +
+              "'\\u{" + hex(range_start)[2:] + "}'" + "..=" +
+              "'\\u{" + hex(range_end - 1)[2:] + "}'" + " => " +
+              "c as u32 - " + hex(range_start) + "u32 + " +
+              str(range_start_num) + ",",
+              file=file)
+
+    print("pub fn diacritic_to_num(c: char) -> u32 {", file=file)
+    print("    match c {", file=file)
+
+    for code in codes:
+        if range_end == code:
+            range_end += 1
+        else:
+            print_range()
+            range_start_num += range_end - range_start
+            range_start = code
+            range_end = code + 1
+    print_range()
+
+    print("        _ => 0", file=file)
+    print("    }", file=file)
+    print("}", file=file)
+
 print("Generating ./rowcolumn_diacritics.sh")
 with open("./rowcolumn_diacritics.sh", "w") as file:
     print("ROWCOLUMN_DIACRITICS=(", file=file, end="")
