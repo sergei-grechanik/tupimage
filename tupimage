@@ -1341,8 +1341,8 @@ tmux_pane_status() {
 }
 
 # Queries whether the given id is known by the terminal. Returns
-# - 0 if reuploading is needed,
-# - 1 if unknown (no response or in inactive tmux pane or one-way mode),
+# - 0 if reuploading is needed or no response,
+# - 1 if impossible to ask (in inactive tmux pane or one-way mode),
 # - 2 if reuploading is not needed.
 # Usage: image_needs_reuploading "$image_id" "$cols" "$rows"
 image_needs_reuploading() {
@@ -1353,20 +1353,23 @@ image_needs_reuploading() {
     if [[ -n "$inside_tmux" ]] && [[ "$(tmux_pane_status)" != "active" ]]; then
         # If we are in tmux, but not in an active pane, we can't get the
         # response quickly, so assume that we don't need reuploading.
-        return 1
+        return 0
     fi
     echostatus "Checking if image with id $image_id needs reuploading"
     # We check if the id is known by recreating the virtual instance. Currently
     # it's always assumed to be of placement_id=1.
     gr_command "a=p,U=1,p=1,i=$image_id,c=${cols},r=${rows}"
-    # Use the shorter timeout. If we don't get a response, assume that we don't
+    # Use the shorter timeout. If we don't get a response, assume that we
     # need reuploading.
-    get_terminal_response 0.5 || return 1
+    if ! get_terminal_response 0.5; then
+        echolog "No response, assuming that reuploading is needed"
+        return 0
+    fi
     if [[ -n "$term_response_ok" ]]; then
         echolog "Image is known by the terminal"
         return 2
     fi
-    echolog "Image needs reuploading"
+    echolog "Image definitely needs reuploading"
     return 0
 }
 
