@@ -978,7 +978,7 @@ if [[ "$uploading_method" =~ ^(auto)$ ]]; then
         echolog "Look like we are in ssh, using direct uploading"
         uploading_method="direct"
     else
-        uploading_method="both"
+        uploading_method="file"
     fi
 fi
 
