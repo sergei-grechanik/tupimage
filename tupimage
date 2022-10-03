@@ -215,6 +215,8 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     TUPIMAGE_CACHE_DIR
         The directory to store images being uploaded (in case if they need to be
         reuploaded) and session databases.
+    TUPIMAGE_LOG_FILE
+        The file to write log messages to. See --log.
     TUPIMAGE_TMUX_HIJACK
         If set to 1, tmux hijacking is allowed (but not forced).
         If set to 0, tmux hijacking is disabled (default).
@@ -286,7 +288,7 @@ file=""
 out="/dev/stdout"
 err=""
 tty="/dev/tty"
-log=""
+log="$TUPIMAGE_LOG_FILE"
 quiet=""
 abort_on_keypress=""
 keep_echo=""
@@ -736,18 +738,27 @@ echoerr() {
     echomessage "error: $1"
 }
 
+# Replaces non-print characters in a string.
+escape_non_print() {
+    echo "$1" | sed 's/\x1b/^[/g' | sed -e 's/[^[:print:]]/?/g'
+}
+
 #####################################################################
 # Keypress checking
 #####################################################################
 
 check_keypress() {
     if [[ -n "$abort_on_keypress" ]]; then
-        read_character=""
-        if read -n 1 -t 0.001 read_character < "$tty"; then
-            if [[ -n "$read_character" ]]; then
-                echoerr "Aborted on key press"
-                exit 1
-            fi
+        read_string=""
+        read -r -d '' -t 0.01 read_string < "$tty"
+        regex='._G.*'
+        if [[ "$read_string" =~ $regex ]]; then
+            echolog "Unused term response: $(escape_non_print "$read_string")"
+            return
+        fi
+        if [[ -n "$read_string" ]]; then
+            echoerr "Aborted on key press: $(escape_non_print "$read_string")"
+            exit 1
         fi
     fi
 }
@@ -890,8 +901,8 @@ fi
 consume_errors() {
     # In one-way communication mode this is not required.
     [[ -z "$one_way" ]] || return
-    while read -r -d '\' -t 0.1 term_response < "$tty"; do
-        echolog "Consuming unneeded response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
+    while read -r -d '' -t 0.1 term_response < "$tty"; do
+        echolog "Consuming unneeded response: $(escape_non_print "$term_response")"
     done
 }
 
@@ -1203,13 +1214,13 @@ gr_command() {
     end_gr_command
     if [[ -n "$log" ]]; then
         local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
-        echolog "SENDING COMMAND: $(sed 's/\x1b/^[/g' <<< "$command")"
+        echolog "SENDING COMMAND: $(escape_non_print "$command")"
     fi
 }
 
 # Show the invalid terminal response message.
 invalid_terminal_response() {
-    echoerr "Invalid terminal response: $(sed 's/\x1b/^[/g' <<< "$term_response")"
+    echoerr "Invalid terminal response: $(escape_non_print "$term_response")"
 }
 
 # Get a response from the terminal and store it in term_response,
@@ -1237,7 +1248,7 @@ get_terminal_response() {
         fi
         return 1
     fi
-    term_response_printable="$(sed 's/\x1b/^[/g' <<< "$term_response")"
+    term_response_printable="$(escape_non_print "$term_response")"
     echolog "term_response: $term_response_printable"
     regex='.*_G.*;OK.*'
     if [[ "$term_response" =~ $regex ]]; then
