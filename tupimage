@@ -628,7 +628,7 @@ else
         echo "File not specified" >&2
         exit 1
     fi
-    if ! [[ -f "$file" ]]; then
+    if ! [[ -e "$file" ]]; then
         echo "File not found: $file (pwd: $(pwd))" >&2
         exit 1
     fi
