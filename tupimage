@@ -11,7 +11,7 @@
 # - Deleting images from session.
 
 script_fullname="$0"
-script_name="$(basename $0)"
+script_name="$(basename "$0")"
 
 short_help="Usage: $script_name [OPTIONS] <image_file>
 
@@ -612,8 +612,8 @@ normalize_bool() {
     fi
 }
 
-if (( $command_count > 0 )); then
-    if (( $command_count > 1 )); then
+if (( command_count > 0 )); then
+    if (( command_count > 1 )); then
         echo "Only one command-like option may be specified" >&2
         exit 1
     fi
@@ -634,10 +634,8 @@ else
     fi
 fi
 
-tmux_hijack="$(normalize_bool "$tmux_hijack")"
-[[ "$?" -eq 0 ]] || exit 1
-tmux_oneway="$(normalize_bool "$tmux_oneway")"
-[[ "$?" -eq 0 ]] || exit 1
+tmux_hijack="$(normalize_bool "$tmux_hijack")" || exit 1
+tmux_oneway="$(normalize_bool "$tmux_oneway")" || exit 1
 
 [[ -n "$uploading_method" ]] || uploading_method="auto"
 
@@ -774,8 +772,8 @@ echolog ""
 echolog "max_cols: $max_cols"
 echolog "max_rows: $max_rows"
 
-[[ -z "$save_info" ]] || > "$save_info"
-[[ -z "$out" ]] || > "$out"
+[[ -z "$save_info" ]] || true > "$save_info"
+[[ -z "$out" ]] || true > "$out"
 
 # Store the pid of the current process if requested. This is needed for tmux
 # hijacking so that the original script can wait for the uploading process.
@@ -792,7 +790,7 @@ fi
 
 # Compute a formula with bc and round to the nearest integer.
 bc_round() {
-    echo "$(LC_NUMERIC=C printf %.0f "$(echo "scale=2;($1) + 0.5" | bc)")"
+    LC_NUMERIC=C printf %.0f "$(echo "scale=2;($1) + 0.5" | bc)"
 }
 
 if [[ -n "$file" ]] && [[ -z "$cols" || -z "$rows" ]]; then
@@ -800,7 +798,8 @@ if [[ -n "$file" ]] && [[ -z "$cols" || -z "$rows" ]]; then
     [[ -n "$cols_per_inch" ]] || cols_per_inch=12.0
     [[ -n "$rows_per_inch" ]] || rows_per_inch=6.0
     # Get the size of the image and its resolution
-    props=($(identify -format '%w %h %x %y' -units PixelsPerInch "$file"))
+    IFS=" " read -r -a props <<< \
+        "$(identify -format '%w %h %x %y' -units PixelsPerInch "$file")"
     if [[ "${#props[@]}" -ne 4 ]]; then
         echoerr "Couldn't get result from identify"
         exit 1
@@ -1079,7 +1078,7 @@ display_image() {
     fi
 
     # Fill the output with characters representing the image
-    for y in `seq 0 $(expr $rows - 1)`; do
+    for y in $(seq 0 "$((rows - 1))"); do
         if [[ $((y % 10)) -eq 0 ]]; then
             check_keypress
         fi
@@ -1093,7 +1092,7 @@ display_image() {
             # cell, and the use just \UEEEE.
             printf "\UEEEE${rowcolumn_diacritics[$y]}%s" "$row_string"
         else
-            for x in `seq 0 $(expr $cols - 1)`; do
+            for x in $(seq 0 "$((cols - 1))"); do
                 # Note that when $x is out of bounds, the column diacritic will
                 # be empty, meaning that the column should be guessed by the
                 # terminal.
@@ -1505,7 +1504,7 @@ upload_image_impl() {
         # The uploading of the chunk goes here.
         start_gr_command
         echo -en "i=$image_id,m=1;" >> "$tty"
-        cat $chunk >> "$tty"
+        cat "$chunk" >> "$tty"
         end_gr_command
     done
 
@@ -1566,15 +1565,13 @@ hijack_tmux() {
         --id "$image_id" \
         --store-pid "$tmp_pid" \
         --store-code "$tmp_ret" \
-        --tmux-hijack-helper
-    if [[ $? -ne 0 ]]; then
-        return 1
-    fi
+        --tmux-hijack-helper \
+        || return 1
     # The process we've created should write its pid to the specified file. It's
     # not always quick.
     for iter in $(seq 10); do
         sleep 0.1
-        local pid_to_wait="$(cat $tmp_pid)"
+        local pid_to_wait="$(cat "$tmp_pid")"
         if [[ -n "$pid_to_wait" ]]; then
             break
         fi
@@ -1592,7 +1589,7 @@ hijack_tmux() {
             break
         fi
     done
-    ret_code="$(cat $tmp_ret)"
+    ret_code="$(cat "$tmp_ret")"
     echolog "Process $pid_to_wait finished with code $ret_code"
     # Display errors from the helper
     if [[ "$ret_code" != 0 ]]; then
@@ -1813,11 +1810,10 @@ if [[ -n "$reupload" ]]; then
                      [[ ! -e "$terminal_dir_24bit/$id" ]]) ||
                     image_needs_reuploading "$id" "$inst_cols" "$inst_rows"; then
                 echomessage "Trying to reupload $inst with id $id ($(date -r "$inst_file"))"
-                reupload_instance "$inst" "$id"
-                if [[ $? -ne 0 ]]; then
-                    reupload_ids_failed+=("$id")
-                else
+                if reupload_instance "$inst" "$id"; then
                     echomessage "Successfully reuploaded id $id"
+                else
+                    reupload_ids_failed+=("$id")
                 fi
             fi
             continue
@@ -2168,7 +2164,7 @@ fi
 # Maybe clean the cache from time to time
 #####################################################################
 
-if (( $RANDOM % 100 < "$cleanup_probability" )); then
+if (( RANDOM % 100 < cleanup_probability )); then
     echostatus "Cleaning up the cache dir"
     cleanup_cache
 fi
