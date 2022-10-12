@@ -943,7 +943,7 @@ session_id="$terminal_id"
 
 # This variable indicates whether we are inside tmux.
 inside_tmux=""
-if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]] && [[ "$TERM" =~ "screen" ]]; then
+if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]] && ([[ "$TERM" =~ "tmux" ]] || [[ "$TERM" =~ "screen" ]]); then
     echolog "Inside tmux, getting info from tmux"
     inside_tmux="1"
     # Get the actual current terminal name from tmux.
