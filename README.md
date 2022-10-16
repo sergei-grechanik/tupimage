@@ -10,6 +10,7 @@ Currently the Unicode placeholder extension is supported only by the following
 terminals:
 - [this fork of Kitty](https://github.com/sergei-grechanik/kitty/tree/unicode-placeholders)
 - [this fork of st](https://github.com/sergei-grechanik/st/tree/graphics)
+- [this fork of Wezterm](https://github.com/sergei-grechanik/wezterm/tree/unicode-placeholders)
 
 ![displaying images in tmux](./tupimage-tmux.gif)
 
