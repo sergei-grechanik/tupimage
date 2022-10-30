@@ -119,6 +119,9 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --max-terminal-cols N
         The maximum number of columns to use for the status message. If not
         specified, it will be computed automatically.
+    --placeholder HEXCODE
+        The hexademical UTF-32 codepoint to use as the placeholder. By default
+        it is 'EEEE', but we'll soon switch to '10EEEE' or something.
 
   ID assignment options:
     --id N
@@ -238,6 +241,8 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     TUPIMAGE_MAX_DAYS_OF_INACTIVITY
         The number of days of inactivity after which a session or terminal
         database is deleted. Default: 30.
+    TUPIMAGE_PLACEHOLDER_CODEPOINT
+        See --placeholder.
 "
 
 # Exit the script on keyboard interrupt
@@ -294,6 +299,8 @@ abort_on_keypress=""
 keep_echo=""
 noesc=""
 less_diacritics=""
+placeholder="EEEE"
+[[ -z "$TUPIMAGE_PLACEHOLDER_CODEPOINT" ]] || placeholder="$TUPIMAGE_PLACEHOLDER_CODEPOINT"
 save_info=""
 no_upload=""
 force_upload=""
@@ -328,6 +335,14 @@ command_count=0
 validate_int() {
     if ! [[ "$2" =~ ^[0-9]+$ ]]; then
         echo "Invalid integer value for $1: $2" >&2
+        exit 1
+    fi
+}
+
+# Usage: validate_hex "$1" "$2"
+validate_hex() {
+    if ! [[ "$2" =~ ^[0-9a-fA-F]+$ ]]; then
+        echo "Invalid hexademical value for $1 (make sure there are no 0x, h, \U, etc): $2" >&2
         exit 1
     fi
 }
@@ -433,6 +448,11 @@ while [[ $# -gt 0 ]]; do
         --less-diacritics)
             less_diacritics=1
             shift
+            ;;
+        --placeholder)
+            validate_hex "$1" "$2"
+            placeholder="$2"
+            shift 2
             ;;
         --save-info)
             save_info="$2"
@@ -1041,7 +1061,7 @@ display_image() {
     if [[ -n "$less_diacritics" ]]; then
         for idx in $(seq 2 "$cols"); do
             row_string="${row_string}"
-            printf -v row_string "%s\UEEEE" "$row_string"
+            printf -v row_string "%s\U${placeholder}" "$row_string"
         done
     fi
 
@@ -1089,14 +1109,14 @@ display_image() {
         echo -n "$line_start"
         if [[ -n "$less_diacritics" ]]; then
             # In the less diacritics mode specify the row only in the first
-            # cell, and the use just \UEEEE.
-            printf "\UEEEE${rowcolumn_diacritics[$y]}%s" "$row_string"
+            # cell, and the rest are just placeholder chars.
+            printf "\U${placeholder}${rowcolumn_diacritics[$y]}%s" "$row_string"
         else
             for x in $(seq 0 "$((cols - 1))"); do
                 # Note that when $x is out of bounds, the column diacritic will
                 # be empty, meaning that the column should be guessed by the
                 # terminal.
-                printf "\UEEEE${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
+                printf "\U${placeholder}${rowcolumn_diacritics[$y]}${rowcolumn_diacritics[$x]}"
             done
         fi
         printf '%s' "$line_end"
