@@ -64,6 +64,11 @@ still produces the placeholder, and the image can be reuploaded later by calling
 $script_name --fix. This behavior is desirable when images are displayed by
 automatic script running within tmux (tmux makes image uploading unreliable).
 
+  Exit codes:
+    0  Success or uploading error.
+    1  Client-side error (invalid arguments, unreadable file, etc).
+    2  User interrupt (Ctrl-C or keypress if --abort-on-keypress).
+
   General options:
     -h
         Show brief help.
@@ -87,7 +92,8 @@ automatic script running within tmux (tmux makes image uploading unreliable).
     --save-info <file>
         Save some information to <file> (like image id, rows, columns, etc).
     --abort-on-keypress
-        Abort when there is an input from the user.
+        Abort when there is an input from the user. The exit code will be 2 in
+        this case.
     --keep-echo
         Do not disable echo with stty.
     --fzf
@@ -762,6 +768,71 @@ escape_non_print() {
 }
 
 #####################################################################
+# Adjusting the terminal state
+#####################################################################
+
+stty_orig=""
+
+disable_echo() {
+    stty -echo < "$tty"
+    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
+    # horrible issues otherwise.
+    stty susp undef < "$tty"
+}
+
+restore_echo() {
+    [[ -n "$stty_orig" ]] || return
+    stty $stty_orig < "$tty"
+}
+
+# We will need to disable echo during image uploading, otherwise responses from
+# the terminal will get echoed. We will restore the terminal settings on exit
+# unless we get brutally killed. We do this even in one-way mode because echo
+# may damage the uploading when used from tmux. The only exception is when $tty
+# is not a tty or when the user requested to keep echo on.
+if [[ -z "$keep_echo" ]]; then
+    if [[ -t 1 ]] >> "$tty"; then
+        echolog "In tty, disabling echo"
+        stty_orig="$(stty -g < "$tty")"
+        disable_echo
+    fi
+fi
+
+# Utility to read response from the terminal that we don't need anymore. (If we
+# don't read it it may end up being displayed which is not pretty).
+consume_errors() {
+    # In one-way communication mode this is not required.
+    [[ -z "$one_way" ]] || return
+    while read -r -d '' -t 0.1 term_response < "$tty"; do
+        echolog "Consuming unneeded response: $(escape_non_print "$term_response")"
+    done
+}
+
+# On exit restore terminal settings, consume possible errors from the terminal
+# and remove the temporary directory.
+cleanup() {
+    echolog "Cleaning up"
+    consume_errors
+    restore_echo
+    if [[ -n "$tmpdir" ]]; then
+        rm "$tmpdir/"* 2> /dev/null
+        rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
+    fi
+}
+
+# Exit with the code 2 on interrupt.
+on_interrupt() {
+    echoerr "Interrupted"
+    exit 2
+}
+
+# Register the cleanup function to be called on the EXIT signal.
+trap cleanup EXIT TERM
+
+# We want to return 2 on interrupt.
+trap on_interrupt INT
+
+#####################################################################
 # Keypress checking
 #####################################################################
 
@@ -775,8 +846,8 @@ check_keypress() {
             return
         fi
         if [[ -n "$read_string" ]]; then
-            echoerr "Aborted on key press: $(escape_non_print "$read_string")"
-            exit 1
+            echoerr "Interrupted by key press: $(escape_non_print "$read_string")"
+            exit 2
         fi
     fi
 }
@@ -883,62 +954,6 @@ if [[ -n "$only_dump_dims" ]]; then
     echo "$cols $rows"
     exit 0
 fi
-
-#####################################################################
-# Adjusting the terminal state
-#####################################################################
-
-stty_orig=""
-
-disable_echo() {
-    stty -echo < "$tty"
-    # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
-    # horrible issues otherwise.
-    stty susp undef < "$tty"
-}
-
-restore_echo() {
-    [[ -n "$stty_orig" ]] || return
-    stty $stty_orig < "$tty"
-}
-
-# We will need to disable echo during image uploading, otherwise responses from
-# the terminal will get echoed. We will restore the terminal settings on exit
-# unless we get brutally killed. We do this even in one-way mode because echo
-# may damage the uploading when used from tmux. The only exception is when $tty
-# is not a tty or when the user requested to keep echo on.
-if [[ -z "$keep_echo" ]]; then
-    if [[ -t 1 ]] >> "$tty"; then
-        echolog "In tty, disabling echo"
-        stty_orig="$(stty -g < "$tty")"
-        disable_echo
-    fi
-fi
-
-# Utility to read response from the terminal that we don't need anymore. (If we
-# don't read it it may end up being displayed which is not pretty).
-consume_errors() {
-    # In one-way communication mode this is not required.
-    [[ -z "$one_way" ]] || return
-    while read -r -d '' -t 0.1 term_response < "$tty"; do
-        echolog "Consuming unneeded response: $(escape_non_print "$term_response")"
-    done
-}
-
-# On exit restore terminal settings, consume possible errors from the terminal
-# and remove the temporary directory.
-cleanup() {
-    echolog "Cleaning up"
-    consume_errors
-    restore_echo
-    if [[ -n "$tmpdir" ]]; then
-        rm "$tmpdir/"* 2> /dev/null
-        rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
-    fi
-}
-
-# Register the cleanup function to be called on the EXIT signal.
-trap cleanup EXIT TERM
 
 #####################################################################
 # Detecting tmux and figuring out the actual terminal name
