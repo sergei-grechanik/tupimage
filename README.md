@@ -8,7 +8,7 @@ tmux and vim, which know nothing about the graphics protocol.
 
 Currently the Unicode placeholder extension is supported only by the following
 terminals:
-- [this fork of Kitty](https://github.com/sergei-grechanik/kitty/tree/unicode-placeholders)
+- [Kitty](https://github.com/kovidgoyal/kitty) (you need at least 0.28.0)
 - [this fork of st](https://github.com/sergei-grechanik/st/tree/graphics)
 - [this fork of Wezterm](https://github.com/sergei-grechanik/wezterm/tree/unicode-placeholders)
 

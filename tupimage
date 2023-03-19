@@ -127,7 +127,7 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         specified, it will be computed automatically.
     --placeholder HEXCODE
         The hexademical UTF-32 codepoint to use as the placeholder. By default
-        it is 'EEEE', but we'll soon switch to '10EEEE' or something.
+        it is '10EEEE', but it used to be 'EEEE'.
 
   ID assignment options:
     --id N
@@ -305,7 +305,7 @@ abort_on_keypress=""
 keep_echo=""
 noesc=""
 less_diacritics=""
-placeholder="EEEE"
+placeholder="10EEEE"
 [[ -z "$TUPIMAGE_PLACEHOLDER_CODEPOINT" ]] || placeholder="$TUPIMAGE_PLACEHOLDER_CODEPOINT"
 save_info=""
 no_upload=""
