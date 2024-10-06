@@ -111,6 +111,8 @@ pass-through sequences (`^[Ptmux`), and image placement is indicated via Unicode
 character with diacritics and color attributes, which are supported by tmux.
 However, there are several issues you should be aware of:
 
+* Tmux is detected by checking if the `TMUX` environment variable is set, `TERM`
+  doesn't matter.
 * Nested tmux sessions are not supported (would require double wrapping).
 * Avoid having a tmux session attached to multiple terminals at the same time.
 * Older versions of tmux may drop pass-through sequences when the terminal is
@@ -133,6 +135,9 @@ However, there are several issues you should be aware of:
   hijack focus by creating a temporary pane of height 1. This focus hijacking
   may be annoying, so it's disabled by default, you can enable it by setting
   `TUPIMAGE_TMUX_HIJACK=1` or using the `--tmux-hijack` option.
+* By default, tupimage will send commands to the pty associated with the current
+  tmux pane. This allows tupimage to work from terminals running within tmux,
+  like screen or vim/neovim terminals.
 
 ## SSH support
 

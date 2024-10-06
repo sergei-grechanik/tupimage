@@ -76,9 +76,17 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Show full help.
     -f <image_file>, --file <image_file>
         The image file (but you can specify it as a positional argument).
+    --user-tty <file>
+        Use the given file to communicate with the user and print status
+        messages. The default is /dev/tty.
+    --command-tty <file>
+        Use the given file to send graphics commands to the terminal. The
+        default is /dev/tty or the value of pane_tty if tmux is detected.
+    --response-tty <file>
+        Use the given file to receive responses from the terminal. The default
+        is /dev/tty.
     --tty <file>
-        Use the given file to communicate with the terminal and output status
-        messages instead of /dev/tty.
+        Sets all three ttys to <file>.
     -e <file>, --err <file>
         Use <file> to output error messages in addition to displaying them as
         the status.
@@ -298,7 +306,9 @@ override_ppi="$TUPIMAGE_OVERRIDE_PPI"
 file=""
 out="/dev/stdout"
 err=""
-tty="/dev/tty"
+user_tty="/dev/tty"
+command_tty=""
+response_tty="/dev/tty"
 log="$TUPIMAGE_LOG_FILE"
 quiet=""
 abort_on_keypress=""
@@ -390,8 +400,22 @@ while [[ $# -gt 0 ]]; do
             err="$2"
             shift 2
             ;;
+        --user-tty)
+            user_tty="$2"
+            shift 2
+            ;;
+        --command-tty)
+            command_tty="$2"
+            shift 2
+            ;;
+        --response-tty)
+            response_tty="$2"
+            shift 2
+            ;;
         --tty)
-            tty="$2"
+            user_tty="$2"
+            command_tty="$2"
+            response_tty="$2"
             shift 2
             ;;
         --log)
@@ -719,23 +743,23 @@ echolog() {
     fi
 }
 
-# A utility function to display what the script is doing (on tty).
+# A utility function to display what the script is doing (on user tty).
 echostatus() {
     echolog "$1"
     if [[ -z "$quiet" ]]; then
         # Clear the current line
         if [[ -z "$start_x" ]]; then
-            echo -ne "\r" >> "$tty"
-            echo -n "${eraser}" >> "$tty"
-            echo -ne "\r" >> "$tty"
+            echo -ne "\r" >> "$user_tty"
+            echo -n "${eraser}" >> "$user_tty"
+            echo -ne "\r" >> "$user_tty"
         else
             # If -x/-y are specified, move to the upper left corner first.
-            echo -en "\e[${start_y};${start_x}H" >> "$tty"
-            echo -n "${eraser}" >> "$tty"
-            echo -en "\e[${start_y};${start_x}H" >> "$tty"
+            echo -en "\e[${start_y};${start_x}H" >> "$user_tty"
+            echo -n "${eraser}" >> "$user_tty"
+            echo -en "\e[${start_y};${start_x}H" >> "$user_tty"
         fi
         # And display the status. Truncate it if it's too long.
-        echo -n "$1" | colrm "$max_terminal_cols" >> "$tty"
+        echo -n "$1" | colrm "$max_terminal_cols" >> "$user_tty"
     fi
 }
 
@@ -768,33 +792,119 @@ escape_non_print() {
 }
 
 #####################################################################
+# Detecting tmux and figuring out the actual terminal name
+#####################################################################
+
+# The name of the terminal, used to adjust to the specific flavor of the
+# protocol (like whether we need to convert to PNG).
+actual_term="$TERM"
+
+# Some id of the terminal. Used to figure out whether some image has already
+# been uploaded to the terminal without querying the terminal itself. Without
+# tmux we just use the window id of the terminal which should somewhat uniquely
+# identify the instance of the terminal.
+terminal_id="$TERM-$WINDOWID"
+
+# Some id of the session. Each session contains its own "namespace" of image
+# ids, i.e. if two processes belong to the same session and load different
+# images, these images have to be assigned to different image ids. Without tmux
+# we just use the terminal id since we can't (easily) reattach a session to a
+# different terminal. For tmux see below.
+session_id="$terminal_id"
+
+# This variable indicates whether we are inside tmux.
+inside_tmux=""
+if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]]; then
+    echolog "Inside tmux, getting info from tmux"
+    inside_tmux="1"
+    # Get the actual current terminal name from tmux.
+    actual_term="$(tmux display-message -p "#{client_termname}")"
+    # There doesn't seem to be a nice way to reliably get the current WINDOWID
+    # of the terminal we are attached to (please correct me if I'm wrong). So we
+    # use the last client pid of tmux as terminal id.
+    terminal_id="tmux-client-$(tmux display-message -p "#{client_pid}")"
+    # For the session id we use the tmux server pid with tmux session id.
+    session_id="tmux-$(tmux display-message -p "#{pid}-#{session_id}")"
+    # Get the pty of the current tmux pane to use as the command tty (unless it
+    # was specified by the user).
+    if [[ -z "$command_tty" ]]; then
+        command_tty="$(tmux display-message -t "$TMUX_PANE" -p "#{pane_tty}")"
+        if [[ ! -e "$command_tty" ]]; then
+            echoerr "Could not find the tmux pane tty: $command_tty"
+            command_tty=""
+        else
+            echolog "Using tmux pane tty: $command_tty"
+        fi
+    fi
+fi
+
+# Replace non-alphabetical chars with '-' to make them suitable for dir names.
+terminal_id="$(sed 's/[^0-9a-zA-Z]/-/g' <<< "$terminal_id")"
+session_id="$(sed 's/[^0-9a-zA-Z]/-/g' <<< "$session_id")"
+
+# Make sure that the cache dir contains session and terminal subdirs.
+[[ -n "$cache_dir" ]] || cache_dir="$HOME/.cache/tupimage"
+session_dir_256="$cache_dir/sessions/${session_id}-8bit_ids"
+terminal_dir_256="$cache_dir/terminals/${terminal_id}-8bit_ids"
+session_dir_24bit="$cache_dir/sessions/${session_id}-24bit_ids"
+terminal_dir_24bit="$cache_dir/terminals/${terminal_id}-24bit_ids"
+
+mkdir -p "$cache_dir/cache/" 2> /dev/null
+mkdir -p "$session_dir_256" 2> /dev/null
+mkdir -p "$terminal_dir_256" 2> /dev/null
+mkdir -p "$session_dir_24bit" 2> /dev/null
+mkdir -p "$terminal_dir_24bit" 2> /dev/null
+
+touch "$session_dir_256" "$terminal_dir_256" \
+    "$session_dir_24bit" "$terminal_dir_24bit"
+
+echolog "terminal_id=$terminal_id"
+echolog "session_id=$session_id"
+
+#####################################################################
 # Adjusting the terminal state
 #####################################################################
 
-stty_orig=""
+[[ -n "$user_tty" ]] || user_tty="/dev/tty"
+[[ -n "$command_tty" ]] || command_tty="/dev/tty"
+[[ -n "$response_tty" ]] || response_tty="/dev/tty"
+echolog "user_tty=$user_tty command_tty=$command_tty response_tty=$response_tty"
 
+stty_orig_user=""
+stty_orig_response=""
+
+# Usage: disable_echo <tty>
 disable_echo() {
-    stty -echo < "$tty"
+    stty -echo < "$1"
     # Disable ctrl-z. Pressing ctrl-z during image uploading may cause some
     # horrible issues otherwise.
-    stty susp undef < "$tty"
+    stty susp undef < "$1"
 }
 
+# Usage: restore_echo <tty> <original_settings>
 restore_echo() {
-    [[ -n "$stty_orig" ]] || return
-    stty $stty_orig < "$tty"
+    [[ -n "$2" ]] || return
+    stty $2 < "$1"
 }
 
 # We will need to disable echo during image uploading, otherwise responses from
 # the terminal will get echoed. We will restore the terminal settings on exit
 # unless we get brutally killed. We do this even in one-way mode because echo
-# may damage the uploading when used from tmux. The only exception is when $tty
+# may damage the uploading when used from tmux. The only exception is when a tty
 # is not a tty or when the user requested to keep echo on.
+# We disable echo only for the repsonse and user ttys.
 if [[ -z "$keep_echo" ]]; then
-    if [[ -t 1 ]] >> "$tty"; then
-        echolog "In tty, disabling echo"
-        stty_orig="$(stty -g < "$tty")"
-        disable_echo
+    if [[ -t 1 ]] >> "$user_tty"; then
+        echolog "$user_tty is tty, disabling echo"
+        stty_orig_user="$(stty -g < "$user_tty")"
+        disable_echo "$user_tty"
+    fi
+    if [[ "$response_tty" != "$user_tty" ]]; then
+        if [[ -t 1 ]] >> "$response_tty"; then
+            echolog "$response_tty is tty, disabling echo"
+            stty_orig_response="$(stty -g < "$response_tty")"
+            disable_echo "$response_tty"
+        fi
     fi
 fi
 
@@ -803,7 +913,7 @@ fi
 consume_errors() {
     # In one-way communication mode this is not required.
     [[ -z "$one_way" ]] || return
-    while read -r -d '' -t 0.1 term_response < "$tty"; do
+    while read -r -d '' -t 0.1 term_response < "$response_tty"; do
         echolog "Consuming unneeded response: $(escape_non_print "$term_response")"
     done
 }
@@ -813,7 +923,10 @@ consume_errors() {
 cleanup() {
     echolog "Cleaning up"
     consume_errors
-    restore_echo
+    if [[ "$response_tty" != "$user_tty" ]]; then
+        restore_echo "$response_tty" "$stty_orig_response"
+    fi
+    restore_echo "$user_tty" "$stty_orig_user"
     if [[ -n "$tmpdir" ]]; then
         rm "$tmpdir/"* 2> /dev/null
         rmdir "$tmpdir" || echolog "Could not remove $tmpdir"
@@ -839,7 +952,7 @@ trap on_interrupt INT
 check_keypress() {
     if [[ -n "$abort_on_keypress" ]]; then
         read_string=""
-        read -r -d '' -t 0.01 read_string < "$tty"
+        read -r -d '' -t 0.01 read_string < "$user_tty"
         regex='._G.*'
         if [[ "$read_string" =~ $regex ]]; then
             echolog "Unused term response: $(escape_non_print "$read_string")"
@@ -954,65 +1067,6 @@ if [[ -n "$only_dump_dims" ]]; then
     echo "$cols $rows"
     exit 0
 fi
-
-#####################################################################
-# Detecting tmux and figuring out the actual terminal name
-#####################################################################
-
-# The name of the terminal, used to adjust to the specific flavor of the
-# protocol (like whether we need to convert to PNG).
-actual_term="$TERM"
-
-# Some id of the terminal. Used to figure out whether some image has already
-# been uploaded to the terminal without querying the terminal itself. Without
-# tmux we just use the window id of the terminal which should somewhat uniquely
-# identify the instance of the terminal.
-terminal_id="$TERM-$WINDOWID"
-
-# Some id of the session. Each session contains its own "namespace" of image
-# ids, i.e. if two processes belong to the same session and load different
-# images, these images have to be assigned to different image ids. Without tmux
-# we just use the terminal id since we can't (easily) reattach a session to a
-# different terminal. For tmux see below.
-session_id="$terminal_id"
-
-# This variable indicates whether we are inside tmux.
-inside_tmux=""
-if [[ -z "$only_dump_dims" ]] && [[ -n "$TMUX" ]] && ([[ "$TERM" =~ "tmux" ]] || [[ "$TERM" =~ "screen" ]]); then
-    echolog "Inside tmux, getting info from tmux"
-    inside_tmux="1"
-    # Get the actual current terminal name from tmux.
-    actual_term="$(tmux display-message -p "#{client_termname}")"
-    # There doesn't seem to be a nice way to reliably get the current WINDOWID
-    # of the terminal we are attached to (please correct me if I'm wrong). So we
-    # use the last client pid of tmux as terminal id.
-    terminal_id="tmux-client-$(tmux display-message -p "#{client_pid}")"
-    # For the session id we use the tmux server pid with tmux session id.
-    session_id="tmux-$(tmux display-message -p "#{pid}-#{session_id}")"
-fi
-
-# Replace non-alphabetical chars with '-' to make them suitable for dir names.
-terminal_id="$(sed 's/[^0-9a-zA-Z]/-/g' <<< "$terminal_id")"
-session_id="$(sed 's/[^0-9a-zA-Z]/-/g' <<< "$session_id")"
-
-# Make sure that the cache dir contains session and terminal subdirs.
-[[ -n "$cache_dir" ]] || cache_dir="$HOME/.cache/tupimage"
-session_dir_256="$cache_dir/sessions/${session_id}-8bit_ids"
-terminal_dir_256="$cache_dir/terminals/${terminal_id}-8bit_ids"
-session_dir_24bit="$cache_dir/sessions/${session_id}-24bit_ids"
-terminal_dir_24bit="$cache_dir/terminals/${terminal_id}-24bit_ids"
-
-mkdir -p "$cache_dir/cache/" 2> /dev/null
-mkdir -p "$session_dir_256" 2> /dev/null
-mkdir -p "$terminal_dir_256" 2> /dev/null
-mkdir -p "$session_dir_24bit" 2> /dev/null
-mkdir -p "$terminal_dir_24bit" 2> /dev/null
-
-touch "$session_dir_256" "$terminal_dir_256" \
-    "$session_dir_24bit" "$terminal_dir_24bit"
-
-echolog "terminal_id=$terminal_id"
-echolog "session_id=$session_id"
 
 #####################################################################
 # Choosing the uploading method
@@ -1233,18 +1287,18 @@ else
 fi
 
 start_gr_command() {
-    echo -en "$graphics_command_start" >> "$tty"
+    echo -en "$graphics_command_start" >> "$command_tty"
 }
 end_gr_command() {
-    echo -en "$graphics_command_end" >> "$tty"
+    echo -en "$graphics_command_end" >> "$command_tty"
 }
 
 # Send a graphics command with the correct start and end
 gr_command() {
     start_gr_command
     # In one-way mode disable any response (q=2).
-    [[ -z "$one_way" ]] || echo -n "q=2," >> "$tty"
-    echo -en "$1" >> "$tty"
+    [[ -z "$one_way" ]] || echo -n "q=2," >> "$command_tty"
+    echo -en "$1" >> "$command_tty"
     end_gr_command
     if [[ -n "$log" ]]; then
         local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
@@ -1273,7 +1327,7 @@ get_terminal_response() {
     # -r means backslash is part of the line
     # -d '\' means \ is the line delimiter
     # -t ... is timeout in seconds
-    if ! read -s -r -d '\' -t "$response_timeout" term_response < "$tty"; then
+    if ! read -s -r -d '\' -t "$response_timeout" term_response < "$response_tty"; then
         if [[ -z "$term_response" ]]; then
             term_response_printable="No response from terminal"
         else
@@ -1538,8 +1592,8 @@ upload_image_impl() {
         fi
         # The uploading of the chunk goes here.
         start_gr_command
-        echo -en "i=$image_id,m=1;" >> "$tty"
-        cat "$chunk" >> "$tty"
+        echo -en "i=$image_id,m=1;" >> "$command_tty"
+        cat "$chunk" >> "$command_tty"
         end_gr_command
     done
 
@@ -1749,12 +1803,12 @@ get_cells_per_inch() {
     # Query the terminal to get the dimensions of a cell in pixels
     echolog "Getting cell width and height"
     if [[ -n "$inside_tmux" ]]; then
-        echo -en '\ePtmux;\e\e[16t\e\\' >> "$tty"
+        echo -en '\ePtmux;\e\e[16t\e\\' >> "$command_tty"
     else
-        echo -en '\e[16t' >> "$tty"
+        echo -en '\e[16t' >> "$command_tty"
     fi
     term_response=""
-    if ! read -s -r -d 't' -t "$default_timeout" term_response < "$tty"; then
+    if ! read -s -r -d 't' -t "$default_timeout" term_response < "$response_tty"; then
         invalid_terminal_response
         return 1
     fi
