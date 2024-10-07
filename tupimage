@@ -257,6 +257,10 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         database is deleted. Default: 30.
     TUPIMAGE_PLACEHOLDER_CODEPOINT
         See --placeholder.
+    TUPIMAGE_COMMAND_TTY
+    TUPIMAGE_RESPONSE_TTY
+    TUPIMAGE_USER_TTY
+        See --command-tty, --response-tty and --user-tty.
 "
 
 # Exit the script on keyboard interrupt
@@ -306,9 +310,9 @@ override_ppi="$TUPIMAGE_OVERRIDE_PPI"
 file=""
 out="/dev/stdout"
 err=""
-user_tty="/dev/tty"
-command_tty=""
-response_tty="/dev/tty"
+user_tty="$TUPIMAGE_USER_TTY"
+command_tty="$TUPIMAGE_COMMAND_TTY"
+response_tty="$TUPIMAGE_RESPONSE_TTY"
 log="$TUPIMAGE_LOG_FILE"
 quiet=""
 abort_on_keypress=""
@@ -747,19 +751,18 @@ echolog() {
 echostatus() {
     echolog "$1"
     if [[ -z "$quiet" ]]; then
-        # Clear the current line
+        # Commands to clear the current line.
+        local erase_line=""
         if [[ -z "$start_x" ]]; then
-            echo -ne "\r" >> "$user_tty"
-            echo -n "${eraser}" >> "$user_tty"
-            echo -ne "\r" >> "$user_tty"
+            erase_line="\r${eraser}\r"
         else
             # If -x/-y are specified, move to the upper left corner first.
-            echo -en "\e[${start_y};${start_x}H" >> "$user_tty"
-            echo -n "${eraser}" >> "$user_tty"
-            echo -en "\e[${start_y};${start_x}H" >> "$user_tty"
+            erase_line="\e[${start_y};${start_x}H${eraser}\e[${start_y};${start_x}H"
         fi
-        # And display the status. Truncate it if it's too long.
-        echo -n "$1" | colrm "$max_terminal_cols" >> "$user_tty"
+        # Truncate the message if it's too long.
+        local message="$(echo -n "$1" | colrm "$max_terminal_cols")"
+        # Display the status.
+        echo -ne "$erase_line$message" >> "$user_tty"
     fi
 }
 
@@ -862,13 +865,17 @@ echolog "terminal_id=$terminal_id"
 echolog "session_id=$session_id"
 
 #####################################################################
-# Adjusting the terminal state
+# Making sure ttys are set
 #####################################################################
 
 [[ -n "$user_tty" ]] || user_tty="/dev/tty"
 [[ -n "$command_tty" ]] || command_tty="/dev/tty"
 [[ -n "$response_tty" ]] || response_tty="/dev/tty"
 echolog "user_tty=$user_tty command_tty=$command_tty response_tty=$response_tty"
+
+#####################################################################
+# Adjusting the terminal state
+#####################################################################
 
 stty_orig_user=""
 stty_orig_response=""
@@ -1279,29 +1286,21 @@ fi
 # Functions to emit the start and the end of a graphics command.
 if [[ -n "$inside_tmux" ]]; then
     # If we are in tmux we have to wrap the command in Ptmux.
-    graphics_command_start='\ePtmux;\e\e_G'
-    graphics_command_end='\e\e\\\e\\'
+    graphics_command_start="$(echo -en '\ePtmux;\e\e_G')"
+    graphics_command_end="$(echo -en '\e\e\\\e\\')"
 else
-    graphics_command_start='\e_G'
-    graphics_command_end='\e\\'
+    graphics_command_start="$(echo -en '\e_G')"
+    graphics_command_end="$(echo -en '\e\\')"
 fi
-
-start_gr_command() {
-    echo -en "$graphics_command_start" >> "$command_tty"
-}
-end_gr_command() {
-    echo -en "$graphics_command_end" >> "$command_tty"
-}
 
 # Send a graphics command with the correct start and end
 gr_command() {
-    start_gr_command
     # In one-way mode disable any response (q=2).
-    [[ -z "$one_way" ]] || echo -n "q=2," >> "$command_tty"
-    echo -en "$1" >> "$command_tty"
-    end_gr_command
+    local quietness=""
+    [[ -z "$one_way" ]] || quietness="q=2,"
+    printf "%s%s%s%s" "$graphics_command_start" "$quietness" "$1" "$graphics_command_end" >> "$command_tty"
     if [[ -n "$log" ]]; then
-        local command="$(echo -en "${graphics_command_start}$1${graphics_command_end}")"
+        local command="$(printf "%s%s%s%s" "$graphics_command_start" "$quietness" "$1" "$graphics_command_end")"
         echolog "SENDING COMMAND: $(escape_non_print "$command")"
     fi
 }
@@ -1591,10 +1590,7 @@ upload_image_impl() {
             echostatus "$((chunk_i*chunk_size*3/4/1024))/$((total_size / 1024))K [$speed]"
         fi
         # The uploading of the chunk goes here.
-        start_gr_command
-        echo -en "i=$image_id,m=1;" >> "$command_tty"
-        cat "$chunk" >> "$command_tty"
-        end_gr_command
+        gr_command "i=$image_id,m=1;$(cat "$chunk")"
     done
 
     # Tell the terminal that we are done.
