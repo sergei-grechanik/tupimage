@@ -139,6 +139,29 @@ However, there are several issues you should be aware of:
   tmux pane. This allows tupimage to work from terminals running within tmux,
   like screen or vim/neovim terminals.
 
+## Other multiplexers
+
+If you are running a different multiplexer-like program (screen, vim terminal
+mode, etc) within tmux, tupimage should work out of the box by using the tmux
+pane pty as a command tty. If you are running it outside of tmux, you can try
+redirecting commands through a named pipe. Before launching a multiplexer, run
+this in your shell:
+
+    eval `tupimage --mkfifo`
+
+This will execute the following commands:
+
+    mkfifo /path/to/fifo
+    tupimage --redirect-commands-from /path/to/fifo --command-tty /dev/tty &
+    export TUPIMAGE_COMMAND_TTY='/path/to/fifo'
+
+The second line launches a background process that continuously redirects
+commands from the fifo to the terminal, trying to preserve their integrity. The
+third line sets the environment variable `TUPIMAGE_COMMAND_TTY` to the path of
+the fifo, so subsequent calls to `tupimage` will send commands to the fifo.
+Note that this is a very experimental feature, and it is also much slower for
+direct uploading.
+
 ## SSH support
 
 SSH is supported. By default, when tupimage detects that it's inside ssh, it

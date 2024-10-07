@@ -223,6 +223,17 @@ automatic script running within tmux (tmux makes image uploading unreliable).
         Do not upload the image and do not allocate an id, just compute the
         number of columns and rows and write them to stdout.
 
+  Miscellaneous:
+    --mkfifo
+        Experimental. Print a script to create a FIFO and a process that
+        continuously reads commands from it and sends them to the command tty.
+        Should be used as follows:
+            eval \`tupimage --mkfifo\`
+    --redirect-commands-from <file>
+        Experimental. Read commands from <file> (usually a named pipe) and send
+        them to the command tty. Will remove <file> after terminating. The
+        process will die if its parent dies.
+
   Environment variables:
     TUPIMAGE_COLS_PER_INCH
     TUPIMAGE_ROWS_PER_INCH
@@ -348,6 +359,8 @@ cmd_clean_cache=""
 cmd_show_status=""
 cmd_show_id=""
 cmd_get_cells_per_inch=""
+cmd_redirect_commands_from=""
+make_fifo=""
 
 command_count=0
 
@@ -608,6 +621,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --get-cells-per-inch)
             cmd_get_cells_per_inch=1
+            ((command_count++))
+            shift
+            ;;
+        --redirect-commands-from)
+            cmd_redirect_commands_from="$2"
+            ((command_count++))
+            shift 2
+            ;;
+        --mkfifo)
+            make_fifo=1
             ((command_count++))
             shift
             ;;
@@ -872,6 +895,56 @@ echolog "session_id=$session_id"
 [[ -n "$command_tty" ]] || command_tty="/dev/tty"
 [[ -n "$response_tty" ]] || response_tty="/dev/tty"
 echolog "user_tty=$user_tty command_tty=$command_tty response_tty=$response_tty"
+
+#####################################################################
+# Handling the mkfifo command
+#####################################################################
+
+if [[ -n "$make_fifo" ]]; then
+    mkdir -p "$cache_dir/fifos" 2> /dev/null
+    fifo_path="$(mktemp "$cache_dir/fifos/$session_id.XXXX.fifo")"
+    rm "$fifo_path" 2> /dev/null
+    echo "mkfifo '$fifo_path';"
+    echo "$0 --redirect-commands-from '$fifo_path' --command-tty '$command_tty' --log '$log' &"
+    echo "export TUPIMAGE_COMMAND_TTY='$fifo_path';"
+    echo "echo 'Redirecting $fifo_path to $command_tty';"
+    exit 0
+fi
+
+#####################################################################
+# Handling the redirect-commands-from command
+#####################################################################
+
+if [[ -n "$cmd_redirect_commands_from" ]]; then
+    parent_pid="$PPID"
+    buffer=""
+    # We use tail -f to make sure that read is blocking. We also need to make
+    # sure that we exit if the parent process dies. To do this we both use the
+    # --pid option of tail and check the parent process existence in the loop.
+    # When tail dies, read will return, and we will exit the loop.
+    tail --pid "$parent_pid" -f "$cmd_redirect_commands_from" | while true; do
+        buffer_part=""
+        if read -s -r -d '\' buffer_part; then
+            buffer_part+='\'
+        fi
+        # If the parent process has terminated, exit the loop.
+        if ! ps -p "$parent_pid" > /dev/null 2>&1; then
+            echolog "Parent process $parent_pid terminated"
+            echomessage "Deleting $cmd_redirect_commands_from"
+            rm "$cmd_redirect_commands_from"
+            exit 0
+        fi
+        [[ -z "$log" ]] || echolog "Read part: $(escape_non_print "$buffer_part")"
+        [[ -n "$buffer_part" ]] || continue
+        buffer+="$buffer_part"
+        if [[ "$buffer" == *$'\033\\' || ${#buffer} -ge 4096 ]]; then
+            printf "%s" "$buffer" >> "$command_tty"
+            [[ -z "$log" ]] || echolog "Redirected command: $(escape_non_print "$buffer")"
+            buffer=""
+        fi
+    done
+    exit 0
+fi
 
 #####################################################################
 # Adjusting the terminal state
