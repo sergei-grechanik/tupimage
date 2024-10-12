@@ -1553,6 +1553,14 @@ upload_image_impl() {
     start_time="$(date +%s%3N)"
     speed=""
 
+    # Abort the previous transmission. We need to do this in the direct
+    # transmission case because it is possible that the previous transmission of
+    # the same-id image was interrupted. The terminal has no way of knowing
+    # whether the first command starts a new transmission or continues the
+    # interrupted one, so the first transmission may be interpreted as a
+    # continuation if we don't abort it first.
+    gr_command "q=2,a=t,i=$image_id,m=0"
+
     # Issue a command indicating that we want to start data transmission for a
     # new image.
     # a=T    the action is to transmit data and create placement
