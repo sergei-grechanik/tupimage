@@ -282,8 +282,6 @@ shopt -s nullglob
 
 # The timeout for terminal response and file locks, in seconds.
 default_timeout=3
-# The size of a chunk (after base64-encoding), in bytes.
-chunk_size=3968
 
 # The probability of running a clean-up on image upload (in %).
 cleanup_probability="$TUPIMAGE_CLEANUP_PROBABILITY"
@@ -896,6 +894,28 @@ echolog "session_id=$session_id"
 [[ -n "$response_tty" ]] || response_tty="/dev/tty"
 echolog "user_tty=$user_tty command_tty=$command_tty response_tty=$response_tty"
 
+# Get the value of PIPE_BUF.
+pipe_buf="$(getconf PIPE_BUF "$command_tty" 2> /dev/null)"
+echolog "Got from getconf PIPE_BUF='$pipe_buf'"
+if [[ "$pipe_buf" =~ ^[0-9]+$ ]]; then
+    # Make sure it's between 512 and 4096.
+    if (( pipe_buf < 512 )); then
+        pipe_buf=512
+    elif (( pipe_buf > 4096 )); then
+        pipe_buf=4096
+    fi
+else
+    # Posix guarantees that PIPE_BUF is at least 512.
+    echolog "PIPE_BUF is not a number, using 512"
+    pipe_buf=512
+fi
+echolog "Final PIPE_BUF=$pipe_buf"
+
+# Compute the size of a data chunk for direct transmission. The size of each
+# graphics command shouldn't be more than PIPE_BUF, so we set the size of an
+# encoded chunk to be PIPE_BUF - 128 to leave some space for the command.
+chunk_size="$((pipe_buf - 128))"
+
 #####################################################################
 # Handling the mkfifo command
 #####################################################################
@@ -937,7 +957,7 @@ if [[ -n "$cmd_redirect_commands_from" ]]; then
         [[ -z "$log" ]] || echolog "Read part: $(escape_non_print "$buffer_part")"
         [[ -n "$buffer_part" ]] || continue
         buffer+="$buffer_part"
-        if [[ "$buffer" == *$'\033\\' || ${#buffer} -ge 4096 ]]; then
+        if [[ "$buffer" == *$'\033\\' || ${#buffer} -ge "$pipe_buf" ]]; then
             printf "%s" "$buffer" >> "$command_tty"
             [[ -z "$log" ]] || echolog "Redirected command: $(escape_non_print "$buffer")"
             buffer=""
@@ -1472,9 +1492,7 @@ upload_image() {
     fi
 
     if [[ "$uploading_method" == "direct" || "$uploading_method" == "both" ]]; then
-        # base64-encode the file and split it into chunks. The size of each
-        # graphics command shouldn't be more than 4096, so we set the size of an
-        # encoded chunk to be 3968, slightly less than that.
+        # base64-encode the file and split it into chunks.
         echostatus "base64-encoding and chunking the image"
         cat "$file" | base64 -w0 | split -b "$chunk_size" - "$tmpdir/chunk_"
     fi
