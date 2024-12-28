@@ -882,6 +882,7 @@ mkdir -p "$terminal_dir_24bit" 2> /dev/null
 touch "$session_dir_256" "$terminal_dir_256" \
     "$session_dir_24bit" "$terminal_dir_24bit"
 
+echolog "actual_term=$actual_term"
 echolog "terminal_id=$terminal_id"
 echolog "session_id=$session_id"
 
@@ -1470,9 +1471,13 @@ upload_image() {
 
     rm "$tmpdir/"* 2> /dev/null
 
-    if [[ "$actual_term" == *kitty* ]]; then
-        # Check if the image is a png, and if it's not, try to convert it.
-        if ! (file "$file" | grep -q "PNG image"); then
+    # Check if the image is a png, and if it's not, try to convert it.
+    if ! (file "$file" | grep -q "PNG image"); then
+        # Currently only st is known to support non-png images.
+        if [[ "$actual_term" != st && \
+              "$actual_term" != *-st && \
+              "$actual_term" != st-* && \
+              "$actual_term" != *-st-* ]]; then
             local png_file="${file}.converted.png"
             if [[ ! -f "$png_file" ]]; then
                 echostatus "Converting the image to png"
@@ -1481,6 +1486,8 @@ upload_image() {
                     echoerr "Cannot convert the image to png"
                     return 1
                 fi
+            else
+                echolog "Using the previously converted image: $png_file"
             fi
             file="$png_file"
         fi
